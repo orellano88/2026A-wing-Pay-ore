@@ -18,15 +18,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build with Gradle
-        run: ./gradlew assembleRelease
-        env:
-          # Si usas el keystore local, asegúrate de que esté en el repo o usa Base64
-          # Por ahora usaremos el keystore que ya está en la carpeta raíz del repo
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEYALIAS_PASSWORD: ${{ secrets.KEYALIAS_PASSWORD }}
+        run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WingPay-Enterprise-v65-STARK
-          path: app/build/outputs/apk/release/*.apk
+          name: WingPay-Enterprise-v66-STARK-B
+          path: app/build/outputs/apk/debug/*.apk
