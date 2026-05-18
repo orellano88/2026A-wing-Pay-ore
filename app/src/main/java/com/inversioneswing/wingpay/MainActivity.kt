@@ -32,6 +32,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var statusLED: View
     private lateinit var syncLED: View
     private lateinit var centralLogo: ImageView
+    private lateinit var sosStopBtn: Button
+    private var sosAnimator: ValueAnimator? = null
     private var toneGenerator: ToneGenerator? = null
     private var currentTopic = "wingpay_client_A2ZQV4"
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -84,7 +86,7 @@ class MainActivity : AppCompatActivity() {
                 setTypeface(null, Typeface.BOLD)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "2026 MASTER UNIVERSAL v65.5-STARK"
+                text = "2026 MASTER UNIVERSAL v66.0-STARK-B"
                 textSize = 10f
                 setTextColor(Color.WHITE)
                 alpha = 0.6f
@@ -119,7 +121,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(25, 25, 25, 25)
         }
         terminalView = TextView(this).apply {
-            text = "[SYSTEM]: WingPay Core Online\n[SYNC]: Tópico: $currentTopic"
+            text = "[SYSTEM]: WingPay Core v66.0 Online\n[SYNC]: Tópico: $currentTopic"
             textSize = 11f
             setTextColor(Color.parseColor("#00FF00"))
             setTypeface(Typeface.MONOSPACE)
@@ -143,11 +145,21 @@ class MainActivity : AppCompatActivity() {
         visualContainer.addView(centralLogo)
         mainLayout.addView(visualContainer)
 
+        // SOS STOP BUTTON (Hidden by default)
+        sosStopBtn = createGlassButton("🛑 DETENER ALERTA", 5f) {
+            stopSOSProtocol()
+        }.apply { 
+            visibility = View.GONE
+            setBackgroundColor(Color.parseColor("#88FF0000"))
+        }
+        mainLayout.addView(sosStopBtn)
+
         // Buttons
         val btnLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            weightSum = 4f
+            weightSum = 5f
         }
+        btnLayout.addView(createGlassButton("📶", 1f) { scanWifi() })
         btnLayout.addView(createGlassButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         btnLayout.addView(createGlassButton("📷 QR", 1f) { openQRScanner() })
         btnLayout.addView(createGlassButton("🧪 TEST", 1f) { triggerTest() })
@@ -167,6 +179,67 @@ class MainActivity : AppCompatActivity() {
         setContentView(mainLayout)
         checkPermissions()
         startStatusMonitor()
+        handleSOSIntent(intent)
+    }
+
+    private fun handleSOSIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra("VISUAL_SOS", false) == true) {
+            triggerVisualSOS()
+        }
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        handleSOSIntent(intent)
+    }
+
+    private fun triggerVisualSOS() {
+        log("ALERTA: SOS REMOTO ACTIVADO - PROTOCOLO DE EMERGENCIA")
+        sosStopBtn.visibility = View.VISIBLE
+        
+        sosAnimator?.cancel()
+        sosAnimator = ValueAnimator.ofObject(ArgbEvaluator(), Color.RED, Color.TRANSPARENT).apply {
+            duration = 500
+            repeatCount = 60 // 30 Segundos (60 ciclos de 0.5s)
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener { animator ->
+                val color = animator.animatedValue as Int
+                mainLayout.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(color, Color.BLACK, color))
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    stopSOSProtocol()
+                }
+            })
+        }
+        sosAnimator?.start()
+    }
+
+    private fun stopSOSProtocol() {
+        sosAnimator?.cancel()
+        sosAnimator = null
+        sosStopBtn.visibility = View.GONE
+        animateNeuralBackground()
+        log("SISTEMA: PROTOCOLO SOS FINALIZADO / INTERVENIDO")
+    }
+
+    private fun scanWifi() {
+        log("SISTEMA: ESCANEANDO REDES WIFI...")
+        try {
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            if (!wifiManager.isWifiEnabled) {
+                log("ERROR: WIFI DESACTIVADO")
+                return
+            }
+            // Note: On Android 10+, scan results might be restricted or require location permission
+            val results = wifiManager.scanResults
+            log("INFO: ENCONTRADAS ${results.size} REDES")
+            results.take(5).forEach { res ->
+                log("-> ${res.SSID} (${res.level}dBm)")
+            }
+        } catch (e: Exception) {
+            log("ERROR: FALLO DE ESCANEO: ${e.message}")
+        }
     }
 
     private fun openQRScanner() {

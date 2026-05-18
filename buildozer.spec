@@ -20,7 +20,7 @@ android.allow_backup = True
 
 
 # --- CONFIGURACION FINAL WING ---
-android.permissions = INTERNET, RECEIVE_BOOT_COMPLETED, POST_NOTIFICATIONS, VIBRATE, CAMERA
+android.permissions = INTERNET, RECEIVE_BOOT_COMPLETED, POST_NOTIFICATIONS, VIBRATE, CAMERA, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION, ACCESS_WIFI_STATE, CHANGE_WIFI_STATE
 android.keystore = wingpay.keystore
 android.keystore_password = 123456
 android.keyalias = wing_alias
