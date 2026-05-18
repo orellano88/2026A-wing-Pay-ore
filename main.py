@@ -26,44 +26,82 @@ class WingPayBridge(FloatLayout):
 1}, padding=[15, 10])
         # Título Corporativo
         title_box = BoxLayout(orientation='vertical')
-        title_box.add_widget(Label(text="[b][color=00FFFF]IMPORTACIONES WING[/color][/b]",  markup=True, font_size='22sp'))
-        title_box.add_widget(Label(text="2026 MASTER UNIVERSAL v65.0", font_size='11sp', 
-color=(0.8, 0.8, 0.8, 1)))
+        title_box.add_widget(Label(text="[b][color=00FFFF]IMPORTACIONES WING[/color][/b]", markup=True, font_size='22sp'))
+        title_box.add_widget(Label(text="2026 MASTER UNIVERSAL v66.0-STARK-B", font_size='11sp', color=(1, 1, 1, 0.8)))
         header.add_widget(title_box)
-        self.add_widget(header)      # Consola de Monitoreo Industrial
-        self.console_box = BoxLayout(size_hint=(0.92, 0.3), pos_hint={'center_x': 0.5, 
-'top': 0.85})
+        self.add_widget(header)
+
+        # Consola de Monitoreo Industrial (Estilo HUD)
+        self.console_box = BoxLayout(size_hint=(0.92, 0.35), pos_hint={'center_x': 0.5, 'top': 0.82})
         with self.console_box.canvas.before:
-            Color(0, 0, 0, 0.85)
-            self.bg_cons = RoundedRectangle(size=self.console_box.size, 
-pos=self.console_box.pos, radius=[12])
-        self.log_label = Label(text="[color=00FF00][SISTEMA]: Listo para Vinculación 
-QR
-[INFO]: Esperando Notificaciones Bancarias...[/color]",
-                               markup=True, font_size='13sp', halign='left', valign='top',  padding=[15, 15])
+            Color(0, 0.05, 0.1, 0.9)
+            self.bg_cons = RoundedRectangle(size=self.console_box.size, pos=self.console_box.pos, radius=[15])
+        
+        self.log_label = Label(text="[color=00FF00][SYSTEM]: WingPay Core v66.0 Online
+[SYNC]: Esperando Transacciones...[/color]",
+                               markup=True, font_size='12sp', halign='left', valign='top', padding=[20, 20])
         self.log_label.bind(size=self.log_label.setter('text_size'))
         self.console_box.add_widget(self.log_label)
         self.add_widget(self.console_box)
-        # Logo Central (Referencia Visual)
-        self.add_widget(Image(source='logo_wing.png', size_hint=(0.6, 0.6), 
-pos_hint={'center_x': 0.5, 'center_y': 0.45}))
-        # Footer de Navegación e Interconexión
-        footer = BoxLayout(orientation='vertical', size_hint=(1, 0.18), pos_hint={'bottom': 
-0}, padding=[10, 5])
-        btn_layout = BoxLayout(orientation='horizontal', spacing=10)
-        btn_style = {'background_normal': '', 'background_color': (0.1, 0.1, 0.1, 0.4), 
-'markup': True}
+
+        # Logo Central con Efecto Neural
+        self.logo = Image(source='logo_wing.png', size_hint=(0.65, 0.65), pos_hint={'center_x': 0.5, 'center_y': 0.45}, opacity=0.5)
+        self.add_widget(self.logo)
+        Clock.schedule_interval(self.animate_neural_pulse, 0.05)
+
+        # Botón Detener SOS (Oculto)
+        self.btn_stop_sos = Button(text="🛑 [b]DETENER ALERTA[/b]", size_hint=(0.8, 0.1), pos_hint={'center_x': 0.5, 'center_y': 0.5},
+                                   background_color=(0.8, 0, 0, 0.9), markup=True, opacity=0, disabled=True)
+        self.btn_stop_sos.bind(on_press=self.stop_sos_visual)
+        self.add_widget(self.btn_stop_sos)
+
+        # Footer de Navegación
+        footer = BoxLayout(orientation='vertical', size_hint=(1, 0.18), pos_hint={'bottom': 0}, padding=[15, 10])
+        btn_layout = BoxLayout(orientation='horizontal', spacing=12)
+        btn_style = {'background_normal': '', 'background_color': (0.1, 0.2, 0.3, 0.6), 'markup': True}
         btn_layout.add_widget(Button(text="📶 [b]WIFI[/b]", **btn_style, on_press=self.scan_wifi))
-        btn_layout.add_widget(Button(text="📷 [b]QR[/b]", **btn_style, 
-on_press=self.scan_qr_pc))
+        btn_layout.add_widget(Button(text="📷 [b]QR[/b]", **btn_style, on_press=self.scan_qr_pc))
         btn_layout.add_widget(Button(text="⚡ [b]TÚNEL[/b]", **btn_style, on_press=self.toggle_tunnel))
         self.btn_sos = Button(text="[color=ff4d4d][b]SOS[/b][/color]", **btn_style)
-        self.btn_sos.bind(on_press=self.send_sos)
+        self.btn_sos.bind(on_press=self.trigger_sos_manual)
         btn_layout.add_widget(self.btn_sos)
         footer.add_widget(btn_layout)
-        footer.add_widget(Label(text="VINCULACIÓN MANUAL ACTIVA", font_size='10sp', 
-color=(0.8, 0.8, 0.8, 1)))
         self.add_widget(footer)
+
+    def animate_neural_pulse(self, dt):
+        import math
+        self.logo.opacity = 0.3 + 0.3 * math.sin(Clock.get_time() * 2)
+
+    def trigger_sos_manual(self, instance):
+        self.send_to_pc({"tipo": "SOS", "msg": "ALERTA CRÍTICA MÓVIL"})
+        self.update_log("[ALERTA]: SOS enviado a la PC")
+        self.start_sos_visual()
+
+    def start_sos_visual(self, *args):
+        self.sos_event = Clock.schedule_interval(self.blink_red, 0.5)
+        self.btn_stop_sos.opacity = 1
+        self.btn_stop_sos.disabled = False
+        self.sos_count = 0
+        self.update_log("[EMERGENCIA]: Iniciando Protocolo Visual 30s")
+
+    def blink_red(self, dt):
+        self.sos_count += 1
+        if self.sos_count > 60: # 30 Segundos
+            self.stop_sos_visual()
+            return
+        if self.sos_count % 2 == 0:
+            Window.clearcolor = (0.5, 0, 0, 1)
+        else:
+            Window.clearcolor = get_color_from_hex('#2c4c5e')
+
+    def stop_sos_visual(self, *args):
+        if hasattr(self, 'sos_event'):
+            Clock.unschedule(self.sos_event)
+        Window.clearcolor = get_color_from_hex('#2c4c5e')
+        self.btn_stop_sos.opacity = 0
+        self.btn_stop_sos.disabled = True
+        self.update_log("[SISTEMA]: Protocolo SOS Finalizado")
+
     def scan_wifi(self, instance):
         try:
             from jnius import autoclass
