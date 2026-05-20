@@ -247,8 +247,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             // TTS Elegante en el móvil (Versión corta para rapidez)
             speak("$bank recibido de $sender por $amount soles.")
             
-            // MENSAJE MAESTRO PARA LA PC (Formato solicitado por el usuario)
-            val pcMessage = "CONFIRMACIÓN DE PAGO: SEÑOR(A) $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"
+            // MENSAJE MAESTRO PARA LA PC (Formato solicitado por el usuario con "DE...")
+            val pcMessage = "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"
             
             // Sincronización con el nuevo formato elegante
             serviceScope.launch { syncToMirror(bank, sender, pcMessage) }
