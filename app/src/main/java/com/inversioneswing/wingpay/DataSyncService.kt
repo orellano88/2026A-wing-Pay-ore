@@ -43,7 +43,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var topic: String = "wing" + "pay_client_" + "A2Z" + "QV4"
 
     companion object {
-        private var inst: DataSyncService? = null
+        internal var inst: DataSyncService? = null
         fun triggerSOS() { inst?.sendSOS() }
         fun isServiceRunning(): Boolean = inst != null
     }
