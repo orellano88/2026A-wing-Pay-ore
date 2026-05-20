@@ -134,8 +134,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             v.vibrate(4000)
         }
         
-        // Alerta personalizada y potente
-        speak("¡ALERTA S O S! EMERGENCIA ACTIVADA DESDE LA ESTACIÓN CENTRAL. REPITO. EMERGENCIA ACTIVADA.")
+        // Alerta personalizada y potente solicitada por el usuario
+        speak("¡ATENCIÓN! NUESTRO LOCAL ESTÁ EN EMERGENCIA ALERTA. NUESTRO LOCAL NECESITA SER REVISADO POR CÁMARAS. REPITO. EMERGENCIA ACTIVADA.")
     }
 
     fun speak(text: String) {

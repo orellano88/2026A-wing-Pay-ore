@@ -159,7 +159,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             weightSum = 5f
         }
-        btnLayout.addView(createGlassButton("📶", 1f) { scanWifi() })
+        btnLayout.addView(createGlassButton("🛑 PC", 1f) { stopRemotePCAlarms() })
         btnLayout.addView(createGlassButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         btnLayout.addView(createGlassButton("📷 QR", 1f) { openQRScanner() })
         btnLayout.addView(createGlassButton("🧪 TEST", 1f) { triggerTest() })
@@ -196,11 +196,11 @@ class MainActivity : AppCompatActivity() {
     private fun triggerVisualSOS() {
         log("ALERTA: SOS REMOTO ACTIVADO - PROTOCOLO DE EMERGENCIA")
         sosStopBtn.visibility = View.VISIBLE
-        
+
         sosAnimator?.cancel()
         sosAnimator = ValueAnimator.ofObject(ArgbEvaluator(), Color.RED, Color.TRANSPARENT).apply {
             duration = 500
-            repeatCount = 60 // 30 Segundos (60 ciclos de 0.5s)
+            repeatCount = 30 // 15 Segundos (30 ciclos de 0.5s)
             repeatMode = ValueAnimator.REVERSE
             addUpdateListener { animator ->
                 val color = animator.animatedValue as Int
@@ -213,9 +213,37 @@ class MainActivity : AppCompatActivity() {
             })
         }
         sosAnimator?.start()
+
+        // Voz Master en el móvil
+        val msg = "¡ATENCIÓN! NUESTRO LOCAL ESTÁ EN EMERGENCIA ALERTA. NUESTRO LOCAL NECESITA SER REVISADO POR CÁMARAS."
+        try {
+            val intent = Intent(this, DataSyncService::class.java).apply {
+                putExtra("CMD_PAYMENT", true)
+                putExtra("NAME", msg)
+                putExtra("BANK", "ALERTA")
+            }
+            startService(intent)
+        } catch (e: Exception) {}
     }
 
-    private fun stopSOSProtocol() {
+    private fun stopRemotePCAlarms() {
+        log("SISTEMA: ENVIANDO ORDEN DE PARADA A LA PC...")
+        mainScope.launch(Dispatchers.IO) {
+            try {
+                val payload = "{\"tipo\": \"STOP_SOS\", \"msg\": \"DETENER ALERTA DESDE MOVIL\"}".toByteArray()
+                val socket = java.net.DatagramSocket()
+                val address = java.net.InetAddress.getByName("192.168.1.100") 
+                val packet = java.net.DatagramPacket(payload, payload.size, address, 5005)
+                socket.send(packet)
+                socket.close()
+                withContext(Dispatchers.Main) { log("[OK]: SEÑAL DE PARADA ENVIADA") }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { log("[ERROR]: PC NO ALCANZABLE") }
+            }
+        }
+    }
+
+    private fun scanWifi() {
         sosAnimator?.cancel()
         sosAnimator = null
         sosStopBtn.visibility = View.GONE
