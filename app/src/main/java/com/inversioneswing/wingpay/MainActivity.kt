@@ -235,6 +235,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun triggerTest() {
+        log("SISTEMA: DISPARANDO PULSO DE PRUEBA...")
         val i = Intent(this, DataSyncService::class.java).apply {
             putExtra("CMD_PAYMENT", true); putExtra("BANK", "WING"); putExtra("NAME", "TEST_STARK"); putExtra("AMT", "0.10")
         }

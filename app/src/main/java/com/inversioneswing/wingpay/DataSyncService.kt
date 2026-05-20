@@ -173,6 +173,10 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 val n = it.getStringExtra("NAME") ?: "NODE"
                 val a = it.getStringExtra("AMT") ?: "0.00"
                 val m = "PAGO MANUAL DETECTADO"
+                
+                // Feedback de voz para el Test/Manual
+                speak("Inversiones Wing: Confirmando pulso de prueba. Sistema Operativo.")
+                
                 serviceScope.launch { syncToMirror(b, n, a, m) }
             }
         }
