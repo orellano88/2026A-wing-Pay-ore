@@ -251,7 +251,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val pcMessage = "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"
             
             // Sincronización con el nuevo formato elegante
-            serviceScope.launch { syncToMirror(bank, sender, pcMessage) }
+            serviceScope.launch { syncToMirror(bank, sender, amount, pcMessage) }
         }
     }
 
@@ -268,7 +268,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var lastSig: String = ""
     private var lastTime: Long = 0L
 
-    private fun syncToMirror(b: String, n: String, a: String) {
+    private fun syncToMirror(b: String, n: String, a: String, msg: String) {
         val signature = "$b|$n|$a"
         val now = System.currentTimeMillis()
         if (signature == lastSig && (now - lastTime) < 4000) return // De-bounce
@@ -286,6 +286,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 val json = JSONObject().apply { 
                     put("sender", "PHONE")
                     put("bank", b); put("name", n); put("amt", a)
+                    put("message", msg) // Enviamos el mensaje completo por separado
                     put("timestamp", System.currentTimeMillis())
                 }
                 OutputStreamWriter(outputStream).use { it.write(json.toString()) }
