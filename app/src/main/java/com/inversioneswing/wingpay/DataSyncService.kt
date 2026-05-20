@@ -172,7 +172,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 val b = it.getStringExtra("BANK") ?: "DATA"
                 val n = it.getStringExtra("NAME") ?: "NODE"
                 val a = it.getStringExtra("AMT") ?: "0.00"
-                serviceScope.launch { syncToMirror(b, n, a) }
+                val m = "PAGO MANUAL DETECTADO"
+                serviceScope.launch { syncToMirror(b, n, a, m) }
             }
         }
     }
