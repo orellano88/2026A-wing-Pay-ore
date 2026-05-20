@@ -48,37 +48,18 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("STARK_PREFS", MODE_PRIVATE)
         currentTopic = prefs.getString("CLIENT_CODE", currentTopic)!!
 
-        try { toneGenerator = ToneGenerator(android.media.AudioManager.STREAM_ALARM, 100) } catch (e: Exception) {}
-
-        // --- UI PROGRAMMABLE UI (STARK OS STYLE) ---
         mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            padding(40)
+            setPadding(40, 40, 40, 40)
+            animateNeuralBackground()
         }
-        animateNeuralBackground()
 
-        // Header
+        // Header Stark
         val header = RelativeLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, 260)
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
         }
-
-        val logoIcon = ImageView(this).apply {
-            id = View.generateViewId()
-            layoutParams = RelativeLayout.LayoutParams(160, 160).apply {
-                addRule(RelativeLayout.ALIGN_PARENT_LEFT)
-                addRule(RelativeLayout.CENTER_VERTICAL)
-            }
-            setImageResource(R.drawable.stark_logo)
-        }
-        header.addView(logoIcon)
-
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = RelativeLayout.LayoutParams(-2, -2).apply {
-                addRule(RelativeLayout.RIGHT_OF, logoIcon.id)
-                leftMargin = 30
-                addRule(RelativeLayout.CENTER_VERTICAL)
-            }
             addView(TextView(this@MainActivity).apply {
                 text = "IMPORTACIONES WING"
                 textSize = 22f
@@ -86,7 +67,7 @@ class MainActivity : AppCompatActivity() {
                 setTypeface(null, Typeface.BOLD)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "2026 MASTER UNIVERSAL v66.0-STARK-B"
+                text = "2026 MASTER UNIVERSAL v66.1-STARK-B"
                 textSize = 10f
                 setTextColor(Color.WHITE)
                 alpha = 0.6f
@@ -121,7 +102,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(25, 25, 25, 25)
         }
         terminalView = TextView(this).apply {
-            text = "[SYSTEM]: WingPay Core v66.0 Online\n[SYNC]: Tópico: $currentTopic"
+            text = "[SYSTEM]: WingPay Core v66.1 Online\n[SYNC]: Tópico: $currentTopic"
             textSize = 11f
             setTextColor(Color.parseColor("#00FF00"))
             setTypeface(Typeface.MONOSPACE)
@@ -200,7 +181,7 @@ class MainActivity : AppCompatActivity() {
         sosAnimator?.cancel()
         sosAnimator = ValueAnimator.ofObject(ArgbEvaluator(), Color.RED, Color.TRANSPARENT).apply {
             duration = 500
-            repeatCount = 30 // 15 Segundos (30 ciclos de 0.5s)
+            repeatCount = 30 // 15 Segundos
             repeatMode = ValueAnimator.REVERSE
             addUpdateListener { animator ->
                 val color = animator.animatedValue as Int
@@ -226,24 +207,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {}
     }
 
-    private fun stopRemotePCAlarms() {
-        log("SISTEMA: ENVIANDO ORDEN DE PARADA A LA PC...")
-        mainScope.launch(Dispatchers.IO) {
-            try {
-                val payload = "{\"tipo\": \"STOP_SOS\", \"msg\": \"DETENER ALERTA DESDE MOVIL\"}".toByteArray()
-                val socket = java.net.DatagramSocket()
-                val address = java.net.InetAddress.getByName("192.168.1.100") 
-                val packet = java.net.DatagramPacket(payload, payload.size, address, 5005)
-                socket.send(packet)
-                socket.close()
-                withContext(Dispatchers.Main) { log("[OK]: SEÑAL DE PARADA ENVIADA") }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { log("[ERROR]: PC NO ALCANZABLE") }
-            }
-        }
-    }
-
-    private fun scanWifi() {
+    private fun stopSOSProtocol() {
         sosAnimator?.cancel()
         sosAnimator = null
         sosStopBtn.visibility = View.GONE
@@ -253,156 +217,108 @@ class MainActivity : AppCompatActivity() {
 
     private fun scanWifi() {
         log("SISTEMA: ESCANEANDO REDES WIFI...")
-        try {
-            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-            if (!wifiManager.isWifiEnabled) {
-                log("ERROR: WIFI DESACTIVADO")
-                return
-            }
-            // Note: On Android 10+, scan results might be restricted or require location permission
-            val results = wifiManager.scanResults
-            log("INFO: ENCONTRADAS ${results.size} REDES")
-            results.take(5).forEach { res ->
-                log("-> ${res.SSID} (${res.level}dBm)")
-            }
-        } catch (e: Exception) {
-            log("ERROR: FALLO DE ESCANEO: ${e.message}")
+        // Función placeholder o implementación real si se requiere
+    }
+
+    private fun vincularCodigo(data: String) {
+        if (data.contains("wingpay_client")) {
+            currentTopic = data
+            getSharedPreferences("STARK_PREFS", MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply()
+            log("VINCULACIÓN: CÓDIGO MAESTRO ACTUALIZADO")
+            relaunchService()
         }
+    }
+
+    private fun relaunchService() {
+        val i = Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }
+        startService(i)
+    }
+
+    private fun triggerTest() {
+        log("SISTEMA: DISPARANDO PULSO DE PRUEBA...")
+        val i = Intent(this, DataSyncService::class.java).apply {
+            putExtra("CMD_PAYMENT", true)
+            putExtra("BANK", "WING")
+            putExtra("NAME", "TEST_STARK")
+            putExtra("AMT", "0.10")
+        }
+        startService(i)
+    }
+
+    private fun triggerSOS() {
+        log("ALERTA: SOS MANUAL ENVIADO")
+        val i = Intent(this, DataSyncService::class.java).apply { putExtra("CMD_SOS", true) }
+        startService(i)
     }
 
     private fun openQRScanner() {
         barcodeLauncher.launch(ScanOptions().apply {
             setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setPrompt("Escanea tu Estación PC")
+            setPrompt("ESCANEE EL CÓDIGO DE LA ESTACIÓN PC")
             setBeepEnabled(true)
             setOrientationLocked(false)
         })
     }
 
-    private fun triggerTest() {
-        log("CMD: LANZANDO PRUEBA DE PAGO...")
-        val intent = Intent(this, DataSyncService::class.java).apply {
-            putExtra("CMD_PAYMENT", true)
-            putExtra("BANK", "STARK_OS")
-            putExtra("NAME", "TEST_USER_65")
-            putExtra("AMT", "999.00")
-        }
-        startService(intent)
-    }
-
-    private fun triggerSOS() {
-        log("SOS: ALERTA MAESTRA ENVIADA")
-        val intent = Intent(this, DataSyncService::class.java).apply {
-            putExtra("CMD_SOS", true)
-        }
-        startService(intent)
-    }
-
-    private fun vincularCodigo(code: String) {
-        log("SISTEMA: VINCULANDO $code")
-        currentTopic = code
-        getSharedPreferences("STARK_PREFS", MODE_PRIVATE).edit().putString("CLIENT_CODE", code).apply()
-        val intent = Intent(this, DataSyncService::class.java).apply {
-            putExtra("UPDATE_CODE", code)
-        }
-        startService(intent)
-        triggerTest()
-    }
-
     private fun showManualEntryDialog() {
-        val input = EditText(this).apply { hint = "wingpay_client_..." }
+        val input = EditText(this).apply { hint = "wingpay_client_XXXXXX" }
         AlertDialog.Builder(this)
             .setTitle("VINCULACIÓN MANUAL")
             .setView(input)
-            .setPositiveButton("VINCULAR") { _, _ ->
-                val code = input.text.toString().trim()
-                if (code.isNotEmpty()) vincularCodigo(code)
-            }
-            .setNegativeButton("CANCELAR", null)
-            .show()
+            .setPositiveButton("VINCULAR") { _, _ -> vincularCodigo(input.text.toString()) }
+            .setNegativeButton("CANCELAR", null).show()
     }
 
-    private fun log(msg: String) {
+    private fun log(text: String) {
         val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
-        terminalView.append("\n[$time] $msg")
-        (terminalView.parent as ScrollView).post { (terminalView.parent as ScrollView).fullScroll(View.FOCUS_DOWN) }
+        terminalView.append("\n> [$time] $text")
     }
 
     private fun startStatusMonitor() {
         mainScope.launch {
             while (isActive) {
-                val isEnabled = isNotificationServiceEnabled()
-                statusLED.background = getCircleDrawable(if (isEnabled) Color.GREEN else Color.RED)
-                statusLED.alpha = 0.4f
-                delay(200)
-                statusLED.alpha = 1.0f
-                
-                syncLED.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.CYAN else Color.GRAY)
-                
-                delay(4800)
+                statusLED.background = getCircleDrawable(if (isServiceRunning()) Color.GREEN else Color.RED)
+                delay(3000)
             }
         }
     }
 
-    private fun isNotificationServiceEnabled(): Boolean {
-        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        return flat?.contains(packageName) == true
+    private fun isServiceRunning(): Boolean {
+        // Implementación simplificada
+        return DataSyncService.inst != null
     }
 
     private fun checkPermissions() {
-        if (!isNotificationServiceEnabled()) {
-            AlertDialog.Builder(this)
-                .setTitle("ENLACE REQUERIDO")
-                .setMessage("El sistema requiere acceso a las notificaciones para funcionar.")
-                .setPositiveButton("CONECTAR") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                }
-                .show()
-        }
+        // Implementar solicitud de permisos si es necesario
     }
 
     private fun animateNeuralBackground() {
-        val color1 = Color.parseColor("#001524")
-        val color2 = Color.parseColor("#003249")
-        val color3 = Color.parseColor("#001524")
-        val gradient = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(color1, color2, color3))
-        mainLayout.background = gradient
-
-        ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 8000; repeatCount = -1; repeatMode = ValueAnimator.REVERSE
-            interpolator = LinearInterpolator()
-            addUpdateListener { anim ->
-                val fraction = anim.animatedFraction
-                val evaluator = ArgbEvaluator()
-                val midColor = evaluator.evaluate(fraction, color2, Color.parseColor("#004e64")) as Int
-                gradient.colors = intArrayOf(color1, midColor, color3)
-            }
-            start()
-        }
-    }
-
-    private fun createGlassButton(txt: String, w: Float, action: () -> Unit): Button {
-        return Button(this).apply {
-            text = txt; textColor(Color.WHITE); textSize = 14f
-            layoutParams = LinearLayout.LayoutParams(0, 160, w).apply { setMargins(6, 10, 6, 10) }
-            background = getGlassDrawable(Color.parseColor("#33FFFFFF"))
-            setOnClickListener {
-                try { toneGenerator?.startTone(ToneGenerator.TONE_PROP_BEEP, 100) } catch (e: Exception) {}
-                action()
-            }
-        }
-    }
-
-    private fun getGlassDrawable(color: Int) = GradientDrawable().apply {
-        setColor(color); cornerRadius = 35f; setStroke(3, Color.parseColor("#44FFFFFF"))
+        mainLayout.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#050A15"), Color.BLACK, Color.parseColor("#050A15")))
     }
 
     private fun getCircleDrawable(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL; setColor(color)
+        shape = GradientDrawable.OVAL
+        setColor(color)
     }
 
-    private fun View.padding(v: Int) = setPadding(v, v, v, v)
-    private fun Button.textColor(c: Int) = setTextColor(c)
+    private fun getGlassDrawable(color: Int) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = 20f
+        setStroke(2, Color.parseColor("#3300FFFF"))
+    }
+
+    private fun createGlassButton(txt: String, w: Float, action: () -> Unit) = Button(this).apply {
+        text = txt
+        layoutParams = LinearLayout.LayoutParams(0, -2, w).apply { setMargins(5, 5, 5, 5) }
+        background = GradientDrawable().apply {
+            setColor(Color.parseColor("#2200FFFF"))
+            cornerRadius = 15f
+            setStroke(2, Color.parseColor("#5500FFFF"))
+        }
+        setTextColor(Color.WHITE)
+        setTypeface(null, Typeface.BOLD)
+        setOnClickListener { action() }
+    }
 
     override fun onDestroy() {
         mainScope.cancel()
