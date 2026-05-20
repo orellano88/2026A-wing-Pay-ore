@@ -159,7 +159,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             weightSum = 5f
         }
-        btnLayout.addView(createGlassButton("🛑 PC", 1f) { stopRemotePCAlarms() })
+        btnLayout.addView(createGlassButton("🛑 PC", 1f) { stopSOSProtocol() })
         btnLayout.addView(createGlassButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         btnLayout.addView(createGlassButton("📷 QR", 1f) { openQRScanner() })
         btnLayout.addView(createGlassButton("🧪 TEST", 1f) { triggerTest() })
