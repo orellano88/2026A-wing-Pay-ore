@@ -229,28 +229,28 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val amount = m.group(2)?.replace(",", "") ?: "0.00"
             val fullAmountMatch = m.group(0)!!
             
-            // FILTRADO ELEGANTE: Limpieza profunda del remitente
+            // FILTRADO ULTRA-AGRESIVO: Limpieza total de basura bancaria
             var sender = raw.replace(fullAmountMatch, "", true)
             
-            // Eliminar ruido común de notificaciones bancarias
-            val noise = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|\\||\\.|\\,|:|\\!|\\?|\\#)".toRegex()
+            // Eliminar ruido y palabras técnicas bancarias
+            val noise = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|\\||\\.|\\,|:|\\!|\\?|\\#)".toRegex()
             sender = sender.replace(noise, " ").trim()
             
-            // Eliminar códigos alfanuméricos sospechosos (IDs de transacción)
-            sender = sender.replace(Regex("[A-Z0-9]{8,}"), " ") 
+            // Eliminar CUALQUIER número que haya quedado (IDs, fechas, etc.)
+            sender = sender.replace(Regex("\\d+"), " ")
             
             // Mantener solo letras y espacios, limpiar espacios múltiples
             sender = sender.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
             
-            // Formatear Nombre (Primera letra Mayúscula)
+            // Formatear Nombre (Mayúsculas Iniciales)
             sender = sender.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
             
             if (sender.isEmpty() || sender.length < 2) sender = "Cliente Particular"
             
             val bank = identifyBank(pkg, raw)
             
-            // TTS Elegante en el móvil (Versión corta para rapidez)
-            speak("$bank recibido de $sender por $amount soles.")
+            // TTS MAESTRO: Solo lo esencial
+            speak("$bank de $sender por $amount soles.")
             
             // MENSAJE MAESTRO PARA LA PC (Formato solicitado por el usuario con "DE...")
             val pcMessage = "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"

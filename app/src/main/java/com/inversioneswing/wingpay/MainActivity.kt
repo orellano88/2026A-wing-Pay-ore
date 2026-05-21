@@ -29,6 +29,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var mainLayout: LinearLayout
     private var terminalView: TextView? = null
+    private var lastClientLabel: TextView? = null
+    private var lastAmountLabel: TextView? = null
     private var statusLED: View? = null
     private var syncLED: View? = null
     private var centralLogo: ImageView? = null
@@ -48,7 +50,6 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
             currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
 
-            // Contenedor Principal con fondo STARK NEURAL (Azul Profundo)
             mainLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(35, 40, 35, 40)
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             setupHeader()
+            setupHUD() // Nueva sección superior elegante
             setupTerminal()
             setupCentralLogo()
             setupSOSButton()
@@ -66,6 +68,7 @@ class MainActivity : AppCompatActivity() {
             
             startStatusMonitor()
             handleSOSIntent(intent)
+            handleIncomingData(intent)
         } catch (e: Exception) {
             val errorView = TextView(this).apply { text = "CRITICAL_ERR: ${e.message}" }
             setContentView(errorView)
@@ -74,7 +77,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupHeader() {
         val header = RelativeLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,25) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,20) }
         }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -85,10 +88,9 @@ class MainActivity : AppCompatActivity() {
                 setTypeface(null, Typeface.BOLD)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "2026 MASTER STARK v66.1-DEF"
+                text = "2026 MASTER STARK v66.2-PRIME"
                 textSize = 10f
-                setTextColor(Color.WHITE)
-                alpha = 0.7f
+                setTextColor(Color.WHITE); alpha = 0.7f
             })
         }
         header.addView(titleLayout)
@@ -107,41 +109,63 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = LinearLayout.LayoutParams(42, 42).apply { setMargins(10, 0, 10, 0) }
                 background = getCircleDrawable(Color.GRAY)
             }
-            addView(statusLED)
-            addView(syncLED)
+            addView(statusLED); addView(syncLED)
         }
         header.addView(ledContainer)
         mainLayout.addView(header)
     }
 
+    private fun setupHUD() {
+        val hudContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 15) }
+            background = getGlassDrawable(Color.parseColor("#3300FFFF"))
+            setPadding(30, 25, 30, 25)
+        }
+
+        hudContainer.addView(TextView(this).apply { 
+            text = "VIGILANCIA DE FLUJO EN TIEMPO REAL"
+            textSize = 8f; setTextColor(Color.GRAY); gravity = Gravity.CENTER 
+        })
+
+        lastClientLabel = TextView(this).apply {
+            text = "ESPERANDO TRANSMISIÓN..."
+            textSize = 15f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER
+        }
+        
+        lastAmountLabel = TextView(this).apply {
+            text = "S/ 0.00"
+            textSize = 30f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER
+        }
+
+        hudContainer.addView(lastClientLabel)
+        hudContainer.addView(lastAmountLabel)
+        mainLayout.addView(hudContainer)
+    }
+
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, 380).apply { setMargins(0, 15, 0, 15) }
+            layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }
             background = getGlassDrawable(Color.parseColor("#CC000000"))
             setPadding(25, 20, 25, 20)
         }
         terminalView = TextView(this).apply {
-            text = "[SISTEMA]: WingPay Core v66.1 Online\n[INFO]: Tópico: $currentTopic"
-            textSize = 10.5f
-            setTextColor(Color.parseColor("#00FF41"))
-            setTypeface(Typeface.MONOSPACE)
+            text = "[SISTEMA]: WingPay Core v66.2 Active\n[INFO]: HUD de Purificación Online"
+            textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE)
         }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) })
         mainLayout.addView(termContainer)
     }
 
     private fun setupCentralLogo() {
-        val visualContainer = FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
-        }
+        val visualContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
         centralLogo = ImageView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(380, 380, Gravity.CENTER)
-            setImageResource(R.drawable.stark_logo)
-            alpha = 0.6f
+            layoutParams = FrameLayout.LayoutParams(350, 350, Gravity.CENTER)
+            setImageResource(R.drawable.stark_logo); alpha = 0.6f
         }
         centralLogo?.let {
-            ObjectAnimator.ofFloat(it, "alpha", 0.35f, 0.85f).apply {
-                duration = 2500; repeatCount = -1; repeatMode = ValueAnimator.REVERSE; start()
+            ObjectAnimator.ofFloat(it, "alpha", 0.4f, 0.8f).apply {
+                duration = 2000; repeatCount = -1; repeatMode = ValueAnimator.REVERSE; start()
             }
             visualContainer.addView(it)
         }
@@ -152,27 +176,15 @@ class MainActivity : AppCompatActivity() {
         sosStopBtn = Button(this).apply {
             text = "🛑 DETENER ALERTA MÓVIL"
             layoutParams = LinearLayout.LayoutParams(-1, 130).apply { setMargins(0, 15, 0, 15) }
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#BBFF0000"))
-                cornerRadius = 18f
-                setStroke(2, Color.WHITE)
-            }
-            setTextColor(Color.WHITE)
-            textSize = 16f
-            setTypeface(null, Typeface.BOLD)
-            visibility = View.GONE
+            background = GradientDrawable().apply { setColor(Color.parseColor("#BBFF0000")); cornerRadius = 18f; setStroke(2, Color.WHITE) }
+            setTextColor(Color.WHITE); textSize = 16f; setTypeface(null, Typeface.BOLD); visibility = View.GONE
             setOnClickListener { stopSOSProtocol() }
         }
         sosStopBtn?.let { mainLayout.addView(it) }
     }
 
     private fun setupActionButtons() {
-        val btnLayout = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            weightSum = 5f
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 10) }
-        }
-        // BOTONERA MAESTRA RECONSTRUIDA
+        val btnLayout = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 5f }
         btnLayout.addView(createActionButton("🛑 PC", 1f) { stopSOSProtocol() })
         btnLayout.addView(createActionButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         btnLayout.addView(createActionButton("📷", 1f) { openQRScanner() })
@@ -181,10 +193,23 @@ class MainActivity : AppCompatActivity() {
         mainLayout.addView(btnLayout)
     }
 
-    private fun triggerVisualSOS() {
-        log("ALERTA: EMERGENCIA REMOTA")
-        sosStopBtn?.visibility = View.VISIBLE
+    private fun handleIncomingData(intent: Intent?) {
+        intent?.let {
+            if (it.getBooleanExtra("CMD_PAYMENT", false)) {
+                val name = it.getStringExtra("NAME") ?: ""
+                val amt = it.getStringExtra("AMT") ?: ""
+                if (name.isNotEmpty() && !name.contains("¡ATENCIÓN!")) {
+                    lastClientLabel?.text = name.uppercase()
+                    lastAmountLabel?.text = "S/ $amt"
+                    log("PURIFICADO: $name | S/ $amt")
+                }
+            }
+        }
+    }
 
+    private fun triggerVisualSOS() {
+        log("ALERTA: EMERGENCIA")
+        sosStopBtn?.visibility = View.VISIBLE
         sosAnimator?.cancel()
         sosAnimator = ValueAnimator.ofObject(ArgbEvaluator(), Color.RED, Color.TRANSPARENT).apply {
             duration = 500; repeatCount = 30; repeatMode = ValueAnimator.REVERSE
@@ -193,65 +218,53 @@ class MainActivity : AppCompatActivity() {
                 mainLayout.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(color, Color.BLACK))
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
-                override fun onAnimationEnd(animation: android.animation.Animator) {
-                    stopSOSProtocol()
-                }
+                override fun onAnimationEnd(animation: android.animation.Animator) { stopSOSProtocol() }
             })
         }
         sosAnimator?.start()
 
         val msg = "¡ATENCIÓN! NUESTRO LOCAL ESTÁ EN EMERGENCIA ALERTA. NUESTRO LOCAL NECESITA SER REVISADO POR CÁMARAS."
-        try {
-            val intent = Intent(this, DataSyncService::class.java).apply {
-                putExtra("CMD_PAYMENT", true); putExtra("NAME", msg); putExtra("BANK", "ALERTA")
-            }
-            startService(intent)
-        } catch (e: Exception) {}
+        startService(Intent(this, DataSyncService::class.java).apply {
+            putExtra("CMD_PAYMENT", true); putExtra("NAME", msg); putExtra("BANK", "ALERTA")
+        })
     }
 
     private fun stopSOSProtocol() {
-        sosAnimator?.cancel()
-        sosAnimator = null
-        sosStopBtn?.visibility = View.GONE
+        sosAnimator?.cancel(); sosAnimator = null; sosStopBtn?.visibility = View.GONE
         mainLayout.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, 
             intArrayOf(Color.parseColor("#0a1a2f"), Color.parseColor("#050A15"), Color.BLACK))
-        log("SISTEMA: ALERTA SILENCIADA")
+        log("SISTEMA: SILENCIADO")
     }
 
     private fun vincularCodigo(data: String) {
         if (data.contains("wingpay_client")) {
             currentTopic = data
             getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply()
-            log("VINCULACIÓN: OK")
-            relaunchService()
+            log("VINCULACIÓN: OK"); relaunchService()
         }
     }
 
     private fun relaunchService() {
         try {
-            val i = Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }
-            startService(i)
-        } catch (e: Exception) { log("ERR: Serv. no activo") }
+            startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) })
+        } catch (e: Exception) { log("ERR: Serv. inactivo") }
     }
 
     private fun triggerTest() {
-        log("SISTEMA: DISPARANDO PULSO DE PRUEBA...")
-        val i = Intent(this, DataSyncService::class.java).apply {
+        log("CMD: TEST_PULSE")
+        startService(Intent(this, DataSyncService::class.java).apply {
             putExtra("CMD_PAYMENT", true); putExtra("BANK", "WING"); putExtra("NAME", "TEST_STARK"); putExtra("AMT", "0.10")
-        }
-        startService(i)
+        })
     }
 
     private fun triggerSOS() {
         log("CMD: SOS_TO_PC")
-        val i = Intent(this, DataSyncService::class.java).apply { putExtra("CMD_SOS", true) }
-        startService(i)
+        startService(Intent(this, DataSyncService::class.java).apply { putExtra("CMD_SOS", true) })
     }
 
     private fun openQRScanner() {
         barcodeLauncher.launch(ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setPrompt("ESCANEE CÓDIGO PC")
+            setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC")
             setBeepEnabled(true); setOrientationLocked(false)
         })
     }
@@ -264,8 +277,7 @@ class MainActivity : AppCompatActivity() {
     private fun startStatusMonitor() {
         mainScope.launch {
             while (isActive) {
-                val isRunning = DataSyncService.isServiceRunning()
-                statusLED?.background = getCircleDrawable(if (isRunning) Color.GREEN else Color.RED)
+                statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED)
                 delay(3000)
             }
         }
@@ -277,28 +289,19 @@ class MainActivity : AppCompatActivity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        handleSOSIntent(intent)
+        handleSOSIntent(intent); handleIncomingData(intent)
     }
 
-    private fun getCircleDrawable(color: Int) = GradientDrawable().apply {
-        shape = GradientDrawable.OVAL; setColor(color)
-    }
-
-    private fun getGlassDrawable(color: Int) = GradientDrawable().apply {
-        setColor(color); cornerRadius = 18f; setStroke(2, Color.parseColor("#4400FFFF"))
-    }
+    private fun getCircleDrawable(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+    private fun getGlassDrawable(color: Int) = GradientDrawable().apply { setColor(color); cornerRadius = 18f; setStroke(2, Color.parseColor("#4400FFFF")) }
 
     private fun createActionButton(txt: String, w: Float, action: () -> Unit) = Button(this).apply {
         text = txt
         layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, w).apply { setMargins(5, 5, 5, 5) }
-        background = GradientDrawable().apply {
-            setColor(Color.parseColor("#2200FFFF")); cornerRadius = 12f; setStroke(1, Color.parseColor("#6600FFFF"))
-        }
-        setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); textSize = 12f
+        background = GradientDrawable().apply { setColor(Color.parseColor("#2200FFFF")); cornerRadius = 12f; setStroke(1, Color.parseColor("#6600FFFF")) }
+        setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); textSize = 11f
         setOnClickListener { action() }
     }
 
-    override fun onDestroy() {
-        mainScope.cancel(); super.onDestroy()
-    }
+    override fun onDestroy() { mainScope.cancel(); super.onDestroy() }
 }
