@@ -1,5 +1,7 @@
 package com.inversioneswing.wingpay
 
+import android.content.BroadcastReceiver
+import android.content.IntentFilter
 import android.animation.ArgbEvaluator
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
@@ -39,6 +41,21 @@ class MainActivity : AppCompatActivity() {
     private var currentTopic = "wingpay_client_A2ZQV4"
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    // RECEPTOR DE SEÑALES PARA EL HUD
+    private val hudReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            intent?.let {
+                val name = it.getStringExtra("NAME") ?: ""
+                val amt = it.getStringExtra("AMT") ?: ""
+                val bank = it.getStringExtra("BANK") ?: "PAGO"
+                
+                lastClientLabel?.text = "$bank DE... ${name.uppercase()}"
+                lastAmountLabel?.text = "S/ $amt"
+                log("HUD: $bank ACTUALIZADO")
+            }
+        }
+    }
+
     private val barcodeLauncher: ActivityResultLauncher<ScanOptions> = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let { vincularCodigo(it) }
     }
@@ -58,7 +75,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             setupHeader()
-            setupHUD() // Nueva sección superior elegante
+            setupHUD()
             setupTerminal()
             setupCentralLogo()
             setupSOSButton()
@@ -69,6 +86,9 @@ class MainActivity : AppCompatActivity() {
             startStatusMonitor()
             handleSOSIntent(intent)
             handleIncomingData(intent)
+
+            // Activamos la escucha del HUD
+            registerReceiver(hudReceiver, IntentFilter("STARK_HUD_UPDATE"))
         } catch (e: Exception) {
             val errorView = TextView(this).apply { text = "CRITICAL_ERR: ${e.message}" }
             setContentView(errorView)
@@ -88,7 +108,7 @@ class MainActivity : AppCompatActivity() {
                 setTypeface(null, Typeface.BOLD)
             })
             addView(TextView(this@MainActivity).apply {
-                text = "2026 MASTER STARK v66.2-PRIME"
+                text = "2026 MASTER STARK v66.3-ULTIMATE"
                 textSize = 10f
                 setTextColor(Color.WHITE); alpha = 0.7f
             })
@@ -150,7 +170,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(25, 20, 25, 20)
         }
         terminalView = TextView(this).apply {
-            text = "[SISTEMA]: WingPay Core v66.2 Active\n[INFO]: HUD de Purificación Online"
+            text = "[SISTEMA]: WingPay Core v66.3 Active\n[INFO]: HUD de Purificación Online"
             textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE)
         }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) })
@@ -198,10 +218,11 @@ class MainActivity : AppCompatActivity() {
             if (it.getBooleanExtra("CMD_PAYMENT", false)) {
                 val name = it.getStringExtra("NAME") ?: ""
                 val amt = it.getStringExtra("AMT") ?: ""
+                val bank = it.getStringExtra("BANK") ?: "DATA"
                 if (name.isNotEmpty() && !name.contains("¡ATENCIÓN!")) {
-                    lastClientLabel?.text = name.uppercase()
+                    lastClientLabel?.text = "$bank DE... ${name.uppercase()}"
                     lastAmountLabel?.text = "S/ $amt"
-                    log("PURIFICADO: $name | S/ $amt")
+                    log("HUD: $bank ACTUALIZADO")
                 }
             }
         }
@@ -303,5 +324,9 @@ class MainActivity : AppCompatActivity() {
         setOnClickListener { action() }
     }
 
-    override fun onDestroy() { mainScope.cancel(); super.onDestroy() }
+    override fun onDestroy() { 
+        mainScope.cancel()
+        try { unregisterReceiver(hudReceiver) } catch (e: Exception) {}
+        super.onDestroy() 
+    }
 }

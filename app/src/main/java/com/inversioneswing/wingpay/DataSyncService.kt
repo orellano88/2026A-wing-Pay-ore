@@ -257,6 +257,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             
             // Sincronización con el nuevo formato elegante
             serviceScope.launch { syncToMirror(bank, sender, amount, pcMessage) }
+
+            // ACTUALIZACIÓN HUD: Enviar señal directa a la pantalla del móvil
+            val hudIntent = Intent("STARK_HUD_UPDATE").apply {
+                putExtra("NAME", sender)
+                putExtra("AMT", amount)
+                putExtra("BANK", bank)
+            }
+            sendBroadcast(hudIntent)
         }
     }
 
