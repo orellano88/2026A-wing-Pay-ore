@@ -221,7 +221,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun analyzeContent(raw: String, pkg: String) {
-        // Regex mejorada para capturar montos con mayor precisión
         val regex = Pattern.compile("(?i)(S/\\s*|S\\.\\s*|S\\s*|soles\\s*)([\\d,]+\\.\\d{2}|[\\d,]+)")
         val m = regex.matcher(raw)
         
@@ -229,40 +228,41 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val amount = m.group(2)?.replace(",", "") ?: "0.00"
             val fullAmountMatch = m.group(0)!!
             
-            // FILTRADO ULTRA-AGRESIVO: Limpieza total de basura bancaria
+            // FILTRADO NIVEL TITÁN: Extracción de Nombre Real
             var sender = raw.replace(fullAmountMatch, "", true)
             
-            // Eliminar ruido y palabras técnicas bancarias
-            val noise = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|\\||\\.|\\,|:|\\!|\\?|\\#)".toRegex()
+            // 1. Eliminar ruidos bancarios y frases de sistema
+            val noise = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|\\||\\.|\\,|:|\\!|\\?|\\#)".toRegex()
             sender = sender.replace(noise, " ").trim()
             
-            // Eliminar CUALQUIER número que haya quedado (IDs, fechas, etc.)
+            // 2. Eliminar abreviaturas sospechosas (Cod, Op, ID, etc.)
+            val abbreviations = "(?i)(cod|op|trans|ref|vta)".toRegex()
+            sender = sender.replace(abbreviations, " ").trim()
+            
+            // 3. Eliminar CUALQUIER número (IDs, códigos, fechas)
             sender = sender.replace(Regex("\\d+"), " ")
             
-            // Mantener solo letras y espacios, limpiar espacios múltiples
+            // 4. Limpiar caracteres no alfabéticos y espacios extra
             sender = sender.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
             
-            // Formatear Nombre (Mayúsculas Iniciales)
+            // 5. Formatear Nombre (Proper Case)
             sender = sender.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
             
-            if (sender.isEmpty() || sender.length < 2) sender = "Cliente Particular"
+            if (sender.isEmpty() || sender.length < 3) sender = "Cliente Particular"
             
             val bank = identifyBank(pkg, raw)
             
-            // TTS MAESTRO: Solo lo esencial
+            // AUDIO MAESTRO: Solo Banco y Nombre Purificado
             speak("$bank de $sender por $amount soles.")
             
-            // MENSAJE MAESTRO PARA LA PC (Formato solicitado por el usuario con "DE...")
+            // MENSAJE MAESTRO PARA LA PC
             val pcMessage = "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"
             
-            // Sincronización con el nuevo formato elegante
             serviceScope.launch { syncToMirror(bank, sender, amount, pcMessage) }
 
-            // ACTUALIZACIÓN HUD: Enviar señal directa a la pantalla del móvil
+            // ACTUALIZACIÓN HUD REAL-TIME
             val hudIntent = Intent("STARK_HUD_UPDATE").apply {
-                putExtra("NAME", sender)
-                putExtra("AMT", amount)
-                putExtra("BANK", bank)
+                putExtra("NAME", sender); putExtra("AMT", amount); putExtra("BANK", bank)
             }
             sendBroadcast(hudIntent)
         }
