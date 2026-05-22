@@ -167,15 +167,32 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     val amount = m.group(2)?.replace(",", "") ?: "0.00"
                     var sender = raw.replace(m.group(0)!!, "", true)
                     
-                    // PURIFICACIÓN TITÁN 3.0
-                    val garbage = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|cod|op|ref|vta|\\||\\.|\\,|:|\\!|\\?|\\#|\\*)".toRegex()
-                    sender = sender.replace(garbage, " ").replace(Regex("\\d+"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
-                    sender = sender.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+                    // PURIFICACIÓN TITÁN 4.0: Filtro Inteligente por palabras completas
+                    // Eliminamos "Yape!" y otros ruidos sin tocar el interior de los nombres
+                    val garbageWords = listOf(
+                        "yapeaste", "recibiste", "transferencia", "de", "pago", "enviado", "recibido", 
+                        "te envió", "soles", "notificación", "operación", "código", "nro", "id", 
+                        "transacción", "dni", "banco", "ahorros", "corriente", "has", "un", "por", 
+                        "a", "comisión", "ventas", "exitoso", "exitosa", "cod", "op", "ref", "vta", "yape"
+                    )
+                    
+                    // Regex potente que busca solo palabras exactas (evita mutilar Agustolino o Cacallica)
+                    garbageWords.forEach { word ->
+                        sender = sender.replace(Regex("(?i)\\b$word\\b"), " ")
+                    }
+                    
+                    // Limpieza final: quitar números sueltos, caracteres especiales y espacios extra
+                    sender = sender.replace(Regex("\\b\\d+\\b"), " ") // Solo números sueltos
+                    sender = sender.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
+                    
+                    // Formatear Nombre (Proper Case)
+                    sender = sender.lowercase().split(" ").filter { it.length > 1 }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
                     
                     if (sender.length < 3) sender = "Cliente Particular"
                     val bank = identifyBank(pkg, raw)
                     val elegant = "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"
                     
+                    // DISPARO DE PROCESAMIENTO (Audio + PC + HUD)
                     dispatchPayment(bank, sender, amount, elegant)
                 }
             }
