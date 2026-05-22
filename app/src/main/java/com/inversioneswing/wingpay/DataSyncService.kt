@@ -214,9 +214,13 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
             val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
             
-            // Unificar contenido para análisis profundo
-            val fullRaw = "$title | $text | $bigText"
-            analyzeContent(fullRaw, pkg)
+            // INTELIGENCIA DE SELECCIÓN: Usar el texto más largo (evita duplicados)
+            val candidates = listOf(title, text, bigText)
+            val fullRaw = candidates.maxByOrNull { it.length } ?: ""
+            
+            if (fullRaw.isNotEmpty()) {
+                analyzeContent(fullRaw, pkg)
+            }
         }
     }
 
@@ -228,31 +232,28 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val amount = m.group(2)?.replace(",", "") ?: "0.00"
             val fullAmountMatch = m.group(0)!!
             
-            // FILTRADO NIVEL TITÁN: Extracción de Nombre Real
+            // FILTRADO NIVEL TITÁN 2.0: Purificación Absoluta
             var sender = raw.replace(fullAmountMatch, "", true)
             
             // 1. Eliminar ruidos bancarios y frases de sistema
-            val noise = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|\\||\\.|\\,|:|\\!|\\?|\\#)".toRegex()
+            val noise = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|\\||\\.|\\,|:|\\!|\\?|\\#|\\*)".toRegex()
             sender = sender.replace(noise, " ").trim()
             
-            // 2. Eliminar abreviaturas sospechosas (Cod, Op, ID, etc.)
-            val abbreviations = "(?i)(cod|op|trans|ref|vta)".toRegex()
+            // 2. Eliminar abreviaturas comunes de bancos
+            val abbreviations = "(?i)(cod|op|trans|ref|vta|opn|ope)".toRegex()
             sender = sender.replace(abbreviations, " ").trim()
             
-            // 3. Eliminar CUALQUIER número (IDs, códigos, fechas)
-            sender = sender.replace(Regex("\\d+"), " ")
-            
-            // 4. Limpiar caracteres no alfabéticos y espacios extra
+            // 3. Mantener ÚNICAMENTE letras y espacios (Esto mata cualquier código numérico)
             sender = sender.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
             
-            // 5. Formatear Nombre (Proper Case)
+            // 4. Formatear Nombre (Proper Case)
             sender = sender.lowercase().split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
             
             if (sender.isEmpty() || sender.length < 3) sender = "Cliente Particular"
             
             val bank = identifyBank(pkg, raw)
             
-            // AUDIO MAESTRO: Solo Banco y Nombre Purificado
+            // AUDIO PURIFICADO (Confirmación inmediata)
             speak("$bank de $sender por $amount soles.")
             
             // MENSAJE MAESTRO PARA LA PC
@@ -260,9 +261,12 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             
             serviceScope.launch { syncToMirror(bank, sender, amount, pcMessage) }
 
-            // ACTUALIZACIÓN HUD REAL-TIME
+            // ACTUALIZACIÓN HUD: Broadcast EXPLICITO (Android 14 Shield)
             val hudIntent = Intent("STARK_HUD_UPDATE").apply {
-                putExtra("NAME", sender); putExtra("AMT", amount); putExtra("BANK", bank)
+                setPackage(packageName) // Crucial: Solo esta app recibirá la señal
+                putExtra("NAME", sender)
+                putExtra("AMT", amount)
+                putExtra("BANK", bank)
             }
             sendBroadcast(hudIntent)
         }
