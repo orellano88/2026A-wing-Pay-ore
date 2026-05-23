@@ -13,6 +13,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.ToneGenerator
 import android.os.Bundle
+import android.os.Build
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -94,7 +95,11 @@ class MainActivity : AppCompatActivity() {
             startStatusMonitor()
             handleSOSIntent(intent)
             
-            registerReceiver(hudReceiver, IntentFilter("STARK_HUD_UPDATE"), Context.RECEIVER_EXPORTED)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(hudReceiver, IntentFilter("STARK_HUD_UPDATE"), Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(hudReceiver, IntentFilter("STARK_HUD_UPDATE"))
+            }
         } catch (e: Exception) {
             val errorView = TextView(this).apply { text = "STARK_ERR: ${e.message}" }
             setContentView(errorView)
