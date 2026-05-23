@@ -1,4 +1,4 @@
-package com.inversioneswing.wingpay
+package com.inversioneswing.starkomega
 
 import android.content.BroadcastReceiver
 import android.content.Context

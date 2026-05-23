@@ -4,15 +4,15 @@ plugins {
 }
 
 android {
-    namespace 'com.inversioneswing.starkvirgin'
+    namespace "com.inversioneswing.starkomega"
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.inversioneswing.starkvirgin"
+        applicationId "com.inversioneswing.starkomega"
         minSdk 24
         targetSdk 34
-        versionCode 901
-        versionName "67.5-STARK-VIRGIN"
+        versionCode 1000
+        versionName "67.6-ULTIMATE-GOD"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

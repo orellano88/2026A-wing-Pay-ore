@@ -1,4 +1,4 @@
-package com.inversioneswing.wingpay
+package com.inversioneswing.starkomega
 
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING"; textSize = 20f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD) })
-            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v67.4-TITAN-OMEGA"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
+            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v67.6-PRIME-GOD"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
         }
         header.addView(titleLayout)
         val ledContainer = LinearLayout(this).apply {
@@ -107,7 +107,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }; background = getGlassDrawable(Color.parseColor("#CC000000")); setPadding(25, 20, 25, 20) }
-        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay TITÁN v67.4 Active\n[INFO]: Protocolo Omega Iniciado"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
+        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay TITÁN v67.6 Active\n[INFO]: Protocolo Omega Iniciado"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) }); mainLayout.addView(termContainer)
     }
 
@@ -157,7 +157,6 @@ class MainActivity : AppCompatActivity() {
         startService(Intent(this, DataSyncService::class.java).apply { 
             action = DataSyncService.MASTER_ACTION
             putExtra(DataSyncService.MASTER_KEY, key)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) // Limpieza de flag
         })
     }
 
