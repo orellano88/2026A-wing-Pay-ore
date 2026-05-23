@@ -23,5 +23,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WingPay-Enterprise-v67.5-STARK-VIRGIN
+          name: WingPay-Enterprise-v68.0-ZENITH
           path: app/build/outputs/apk/debug/*.apk
