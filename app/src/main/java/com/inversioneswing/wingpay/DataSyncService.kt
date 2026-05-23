@@ -31,7 +31,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     
     private var topic: String = "wingpay_client_A2ZQV4"
     
-    // ESCUDOS DE SEGURIDAD
     private var lastProcessedSignature = ""
     private var lastProcessedTime = 0L
     private var lastSosTime = 0L
@@ -88,7 +87,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     private fun triggerLocalAlarm() {
         val now = System.currentTimeMillis()
-        if (now - lastSosTime < 45000) return // ESCUDO DE CALMA: No repetir en 45 seg
+        if (now - lastSosTime < 45000) return 
         lastSosTime = now
 
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -102,14 +101,12 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         }
         startActivity(intent)
 
-        // VIBRACIÓN INFINITA (Sirena)
         val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         val pattern = longArrayOf(0, 1000, 400, 1000, 400)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             v.vibrate(VibrationEffect.createWaveform(pattern, 0))
         } else v.vibrate(pattern, 0)
         
-        // TONO SIRENA AGRESIVO (Oscilante)
         sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
         serviceScope.launch {
             repeat(10) {
@@ -143,6 +140,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.let {
             if (it.getBooleanExtra("CMD_SOS", false)) sendSOS()
+            if (it.getBooleanExtra("CMD_POLICE", false)) sendPoliceAlarm() // ORDEN CLARA PARA EL BOTÓN POLICIAL
             if (it.getBooleanExtra("CMD_PAYMENT", false)) {
                 val b = it.getStringExtra("BANK") ?: "TEST"
                 val n = it.getStringExtra("NAME") ?: "STARK_NODE"
@@ -170,6 +168,31 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             putExtra("NAME", name); putExtra("AMT", amount); putExtra("BANK", bank)
         }
         sendBroadcast(hudIntent)
+    }
+
+    fun sendPoliceAlarm() {
+        val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
+        
+        // 1. Forzar volumen máximo localmente
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+        speak(msg)
+
+        // 2. Enviar señal a la PC para que también lo diga fuerte
+        serviceScope.launch {
+            try {
+                val url = URL("https://ntfy.sh/$topic")
+                (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"; doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    val json = JSONObject().apply { 
+                        put("sender", "PHONE"); put("type", "SAY"); put("message", msg) 
+                    }
+                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    responseCode; disconnect()
+                }
+            } catch (e: Exception) {}
+        }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -230,33 +253,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     requestMethod = "POST"; doOutput = true
                     setRequestProperty("Content-Type", "application/json")
                     val json = JSONObject().apply { put("sender", "PHONE"); put("type", "SOS") }
-                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
-                    responseCode; disconnect()
-                }
-            } catch (e: Exception) {}
-        }
-    }
-
-    fun sendPoliceAlarm() {
-        val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
-        
-        // 1. Forzar volumen máximo localmente
-        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
-        speak(msg)
-
-        // 2. Enviar señal a la PC para que también lo diga fuerte
-        serviceScope.launch {
-            try {
-                val url = URL("https://ntfy.sh/$topic")
-                (url.openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"; doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    val json = JSONObject().apply { 
-                        put("sender", "PHONE")
-                        put("type", "SAY")
-                        put("message", msg) 
-                    }
                     OutputStreamWriter(outputStream).use { it.write(json.toString()) }
                     responseCode; disconnect()
                 }
