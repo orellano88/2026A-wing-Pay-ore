@@ -21,7 +21,7 @@ import java.util.regex.Pattern
 
 class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
-    private val CID = "STARK_CORE_2026_FINAL"
+    private val CID = "STARK_CORE_FINAL_V70"
     private var job: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var lock: PowerManager.WakeLock
@@ -32,25 +32,25 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var lastSosTime = 0L
     private var sirenTone: ToneGenerator? = null
 
-    // PROTOCOLO OMEGA: Inhibidor de Interferencia
-    private var isAlarmActive = false
+    // BLOQUEO DE INTERFERENCIA (V70.0)
+    private var panicLockActive = false
 
     companion object {
         internal var inst: DataSyncService? = null
         fun isServiceRunning(): Boolean = inst != null
         
-        const val MASTER_ACTION = "com.stark.ACTION_EXECUTE"
-        const val MASTER_KEY = "STARK_KEY"
-        const val KEY_SOS = 1001
-        const val KEY_POLICE = 1002
-        const val KEY_TEST = 1003
+        const val MASTER_ACTION = "com.stark.MASTER_EXECUTE"
+        const val MASTER_KEY = "STARK_COMMAND"
+        const val KEY_SOS = 5001
+        const val KEY_POLICE = 5002
+        const val KEY_TEST = 5003
     }
 
     override fun onCreate() {
         super.onCreate()
         inst = this
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:omega")
+        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:omega_v70")
         if (!lock.isHeld) lock.acquire()
         tts = TextToSpeech(this, this)
         val prefs = getSharedPreferences("STARK_PREFS", MODE_PRIVATE)
@@ -77,6 +77,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun processRemote(line: String) {
         try {
             val j = JSONObject(JSONObject(line).getString("message"))
+            // Ignorar comandos que nosotros mismos enviamos
+            if (j.optString("sender") == "PHONE" || j.optString("sender") == "PHONE_PANIC") return
             if (j.optString("sender") == "PC" && j.optString("type") == "SOS") triggerLocalAlarm()
         } catch (e: Exception) {}
     }
@@ -84,57 +86,85 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun triggerLocalAlarm() {
         if (System.currentTimeMillis() - lastSosTime < 30000) return
         lastSosTime = System.currentTimeMillis()
-        isAlarmActive = true
+        panicLockActive = true
         
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         
-        startActivity(Intent(this, MainActivity::class.java).apply { 
+        val intent = Intent(this, MainActivity::class.java).apply { 
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             putExtra("VISUAL_SOS", true) 
-        })
+        }
+        startActivity(intent)
 
         sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
         serviceScope.launch { 
             repeat(8) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }
             stopSiren()
-            isAlarmActive = false
+            panicLockActive = false
         }
-        speak("ALERTA STARK: REVISIÓN DE CÁMARAS EN CURSO.")
+        speak("ALERTA STARK: EMERGENCIA EN CURSO. REVISIÓN DE CÁMARAS.")
     }
 
     fun stopSiren() { 
         sirenTone?.stopTone()
         (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
-        isAlarmActive = false
+        panicLockActive = false
     }
 
     fun speak(text: String, flush: Boolean = true) {
         if (text.isEmpty() || !ttsOk) return
         val p = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
-        tts?.speak(text, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, p, "ID_" + System.currentTimeMillis())
+        val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        tts?.speak(text, mode, p, "STARK_V70_" + System.currentTimeMillis())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == MASTER_ACTION) {
             when (intent.getIntExtra(MASTER_KEY, 0)) {
                 KEY_SOS -> sendSOS()
-                KEY_POLICE -> {
-                    isAlarmActive = true
-                    val msg = "ATENCION. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
-                    speak(msg)
-                    syncToMirror("POLICIA", "STARK_SHIELD", "0", msg)
-                    serviceScope.launch { delay(20000); isAlarmActive = false }
-                }
+                KEY_POLICE -> executePoliceProtocol()
                 KEY_TEST -> {
-                    speak("STARK SYSTEM ONLINE. VERIFICACIÓN DE DEPÓSITO EXITOSA.")
-                    dispatchHUD("PRUEBA_STARK", "1.00", "STARK")
-                    syncToMirror("STARK", "VERIFICACION", "1.00", "OMEGA_TEST")
+                    speak("STARK SYSTEM ONLINE. ENLACE VERIFICADO.")
+                    dispatchHUD("PRUEBA_EXITOSA", "1.00", "STARK")
+                    syncToMirror("STARK_CHECK", "SYSTEM", "1.00", "VERIFICACION")
                 }
             }
         }
         setupForegroundNotification()
         return START_STICKY
+    }
+
+    private fun executePoliceProtocol() {
+        panicLockActive = true
+        val msg = "ATENCION. Se ha activado la alarma de seguridad. La policia ya fue notificada y las camaras estan transmitiendo en vivo. Retirense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
+        
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+        
+        // El celular habla con prioridad absoluta y vacía cualquier otra voz
+        speak(msg, true)
+        
+        // Sincronización con PC: Usamos un remitente único que el lector ignorará
+        serviceScope.launch {
+            try {
+                val url = URL("https://ntfy.sh/$topic")
+                (url.openConnection() as HttpURLConnection).apply { 
+                    requestMethod = "POST"; doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    val json = JSONObject().apply { 
+                        put("sender", "PHONE_PANIC") // ID ÚNICO
+                        put("type", "SAY")
+                        put("message", msg) 
+                        put("bank", "STARK_ALERTA")
+                    }
+                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    responseCode; disconnect()
+                }
+            } catch (e: Exception) {}
+            delay(20000)
+            panicLockActive = false
+        }
     }
 
     private fun dispatchHUD(n: String, a: String, b: String) {
@@ -143,7 +173,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val pkg = sbn.packageName.lowercase()
-        if (isAlarmActive || pkg.contains("ntfy")) return
+        // BLOQUEO ABSOLUTO: Si la alarma está sonando o es una notificación de red, no leer nada
+        if (panicLockActive || pkg.contains("ntfy")) return
         
         if (listOf("yape", "plin", "bcp", "interbank", "bbva", "scotia", "banco", "pay").any { pkg.contains(it) }) {
             val ex = sbn.notification.extras
@@ -151,7 +182,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
             val raw = if (text.length > title.length) text else title
             
-            if (raw.contains("STARK") || raw.contains("ALERTA")) return
+            // ESCUDO ANTI-FANTASMA: Si contiene palabras de nuestro sistema, ignorar de raíz
+            if (raw.contains("STARK") || raw.contains("ALERTA") || raw.contains("POLICIAL") || raw.contains("GUARD")) return
 
             val m = Pattern.compile("(?i)(S/\\s*|S\\.\\s*|S\\s*|soles\\s*)([\\d,]+\\.\\d{2}|[\\d,]+)").matcher(raw)
             if (m.find()) {
@@ -190,9 +222,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         serviceScope.launch {
             try {
                 val url = URL("https://ntfy.sh/$topic")
-                (url.openConnection() as HttpURLConnection).apply { requestMethod = "POST"; doOutput = true; setRequestProperty("Content-Type", "application/json")
-                    val json = JSONObject().apply { put("sender", "PHONE"); put("type", "SOS") }
-                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }; responseCode; disconnect() }
+                (url.openConnection() as HttpURLConnection).apply { requestMethod = "POST"; doOutput = true; setRequestProperty("Content-Type", "application/json"); val json = JSONObject().apply { put("sender", "PHONE"); put("type", "SOS") }; OutputStreamWriter(outputStream).use { it.write(json.toString()) }; responseCode; disconnect() }
             } catch (e: Exception) {}
         }
     }
@@ -202,7 +232,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val m = getSystemService(NotificationManager::class.java)
             m.createNotificationChannel(NotificationChannel(CID, "Security", NotificationManager.IMPORTANCE_LOW))
         }
-        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark Omega Active").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
+        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark V70 Guard Online").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) startForeground(2026, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
         else startForeground(2026, n)
     }
