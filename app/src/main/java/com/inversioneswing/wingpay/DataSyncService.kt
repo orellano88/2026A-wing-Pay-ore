@@ -4,6 +4,7 @@ import android.app.*
 import android.content.*
 import android.content.pm.ServiceInfo
 import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.*
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -30,9 +31,11 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     
     private var topic: String = "wingpay_client_A2ZQV4"
     
-    // ESCUDO ANTI-DUPLICADOS (Evita el Eco)
+    // ESCUDOS DE SEGURIDAD
     private var lastProcessedSignature = ""
     private var lastProcessedTime = 0L
+    private var lastSosTime = 0L
+    private var sirenTone: ToneGenerator? = null
 
     companion object {
         internal var inst: DataSyncService? = null
@@ -84,8 +87,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun triggerLocalAlarm() {
+        val now = System.currentTimeMillis()
+        if (now - lastSosTime < 45000) return // ESCUDO DE CALMA: No repetir en 45 seg
+        lastSosTime = now
+
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+        am.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
         
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -93,12 +102,34 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         }
         startActivity(intent)
 
+        // VIBRACIÓN INFINITA (Sirena)
         val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        val pattern = longArrayOf(0, 1000, 400, 1000, 400)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 800, 200, 800), -1))
-        } else v.vibrate(3000)
+            v.vibrate(VibrationEffect.createWaveform(pattern, 0))
+        } else v.vibrate(pattern, 0)
         
-        speak("¡ATENCIÓN! NUESTRO LOCAL ESTÁ EN EMERGENCIA ALERTA. NUESTRO LOCAL NECESITA SER REVISADO POR CÁMARAS.")
+        // TONO SIRENA AGRESIVO (Oscilante)
+        sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+        serviceScope.launch {
+            repeat(10) {
+                sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 1000)
+                delay(1200)
+                sirenTone?.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 1000)
+                delay(1200)
+            }
+            stopSiren()
+        }
+        
+        speak("¡ALERTA SÍSMICA DE SEGURIDAD! NUESTRO LOCAL ESTÁ BAJO AMENAZA. REVISIÓN DE CÁMARAS OBLIGATORIA.")
+    }
+
+    fun stopSiren() {
+        try {
+            sirenTone?.stopTone()
+            val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            v.cancel()
+        } catch (e: Exception) {}
     }
 
     fun speak(text: String) {
@@ -124,7 +155,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun dispatchPayment(bank: String, name: String, amount: String, elegantMsg: String) {
-        // ESCUDO DE DUPLICADOS: Bloquea si la misma firma llega en menos de 5 segundos
         val signature = "$bank|$name|$amount"
         val now = System.currentTimeMillis()
         if (signature == lastProcessedSignature && (now - lastProcessedTime) < 5000) return
@@ -132,13 +162,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         lastProcessedSignature = signature
         lastProcessedTime = now
 
-        // 1. Audio Purificado
         speak("$bank de $name por $amount soles.")
-
-        // 2. Sincronización PC
         serviceScope.launch { syncToMirror(bank, name, amount, elegantMsg) }
 
-        // 3. Actualización HUD (Vía Broadcast Explícito)
         val hudIntent = Intent("STARK_HUD_UPDATE").apply {
             setPackage(packageName)
             putExtra("NAME", name); putExtra("AMT", amount); putExtra("BANK", bank)
@@ -149,51 +175,24 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val pkg = sbn.packageName.lowercase()
         val targets = listOf("yape", "plin", "bcp", "interbank", "bbva", "scotia", "banco", "pay")
-        
         if (targets.any { pkg.contains(it) }) {
             val extras = sbn.notification.extras
-            val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-            val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-            val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
-            
-            val candidates = listOf(title, text, bigText)
+            val candidates = listOf(extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "", 
+                                    extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: "", 
+                                    extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: "")
             val raw = candidates.maxByOrNull { it.length } ?: ""
-            
             if (raw.isNotEmpty()) {
                 val regex = Pattern.compile("(?i)(S/\\s*|S\\.\\s*|S\\s*|soles\\s*)([\\d,]+\\.\\d{2}|[\\d,]+)")
                 val m = regex.matcher(raw)
-                
                 if (m.find()) {
                     val amount = m.group(2)?.replace(",", "") ?: "0.00"
                     var sender = raw.replace(m.group(0)!!, "", true)
-                    
-                    // PURIFICACIÓN TITÁN 4.0: Filtro Inteligente por palabras completas
-                    // Eliminamos "Yape!" y otros ruidos sin tocar el interior de los nombres
-                    val garbageWords = listOf(
-                        "yapeaste", "recibiste", "transferencia", "de", "pago", "enviado", "recibido", 
-                        "te envió", "soles", "notificación", "operación", "código", "nro", "id", 
-                        "transacción", "dni", "banco", "ahorros", "corriente", "has", "un", "por", 
-                        "a", "comisión", "ventas", "exitoso", "exitosa", "cod", "op", "ref", "vta", "yape"
-                    )
-                    
-                    // Regex potente que busca solo palabras exactas (evita mutilar Agustolino o Cacallica)
-                    garbageWords.forEach { word ->
-                        sender = sender.replace(Regex("(?i)\\b$word\\b"), " ")
-                    }
-                    
-                    // Limpieza final: quitar números sueltos, caracteres especiales y espacios extra
-                    sender = sender.replace(Regex("\\b\\d+\\b"), " ") // Solo números sueltos
-                    sender = sender.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
-                    
-                    // Formatear Nombre (Proper Case)
+                    val garbage = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|cod|op|ref|vta|\\||\\.|\\,|:|\\!|\\?|\\#|\\*)".toRegex()
+                    sender = sender.replace(garbage, " ").replace(Regex("\\d+"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
                     sender = sender.lowercase().split(" ").filter { it.length > 1 }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
-                    
                     if (sender.length < 3) sender = "Cliente Particular"
                     val bank = identifyBank(pkg, raw)
-                    val elegant = "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING"
-                    
-                    // DISPARO DE PROCESAMIENTO (Audio + PC + HUD)
-                    dispatchPayment(bank, sender, amount, elegant)
+                    dispatchPayment(bank, sender, amount, "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING")
                 }
             }
         }
@@ -253,5 +252,5 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         if (status == TextToSpeech.SUCCESS) { tts?.language = Locale("es", "PE"); ttsOk = true }
     }
 
-    override fun onDestroy() { inst = null; serviceScope.cancel(); tts?.shutdown(); super.onDestroy() }
+    override fun onDestroy() { inst = null; serviceScope.cancel(); tts?.shutdown(); stopSiren(); super.onDestroy() }
 }

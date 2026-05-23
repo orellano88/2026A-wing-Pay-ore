@@ -251,10 +251,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopSOSProtocol() {
-        sosAnimator?.cancel(); sosAnimator = null; sosStopBtn?.visibility = View.GONE
+        sosAnimator?.cancel()
+        sosAnimator = null
+        sosStopBtn?.visibility = View.GONE
         mainLayout.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, 
             intArrayOf(Color.parseColor("#0a1a2f"), Color.parseColor("#050A15"), Color.BLACK))
-        log("SISTEMA: SILENCIADO")
+        log("SISTEMA: ALERTA SILENCIADA")
+        
+        // Detenemos la sirena y vibración del servicio
+        DataSyncService.inst?.stopSiren()
     }
 
     private fun vincularCodigo(data: String) {
