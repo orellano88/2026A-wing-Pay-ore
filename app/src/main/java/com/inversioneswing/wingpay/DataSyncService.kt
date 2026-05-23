@@ -237,6 +237,33 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         }
     }
 
+    fun sendPoliceAlarm() {
+        val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
+        
+        // 1. Forzar volumen máximo localmente
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+        speak(msg)
+
+        // 2. Enviar señal a la PC para que también lo diga fuerte
+        serviceScope.launch {
+            try {
+                val url = URL("https://ntfy.sh/$topic")
+                (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"; doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    val json = JSONObject().apply { 
+                        put("sender", "PHONE")
+                        put("type", "SAY")
+                        put("message", msg) 
+                    }
+                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    responseCode; disconnect()
+                }
+            } catch (e: Exception) {}
+        }
+    }
+
     private fun setupForegroundNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val m = getSystemService(NotificationManager::class.java)
