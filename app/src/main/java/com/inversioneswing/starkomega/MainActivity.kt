@@ -49,8 +49,10 @@ class MainActivity : AppCompatActivity() {
                 val name = it.getStringExtra("NAME") ?: ""
                 val amt = it.getStringExtra("AMT") ?: ""
                 val bank = it.getStringExtra("BANK") ?: "PAGO"
-                lastClientLabel?.text = "$bank DE... $name"
-                lastAmountLabel?.text = "S/ $amt"
+                lastClientLabel?.post { 
+                    lastClientLabel?.text = "$bank DE... $name"
+                    lastAmountLabel?.text = "S/ $amt"
+                }
                 log("HUD: $bank ACTUALIZADO")
             }
         }
@@ -63,7 +65,6 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
-        // PROTOCOLO DESPERTAR: Forzar visibilidad sobre bloqueo
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
             setShowWhenLocked(true)
             setTurnScreenOn(true)
@@ -79,18 +80,23 @@ class MainActivity : AppCompatActivity() {
         try {
             val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
             currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
+
             mainLayout = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(35, 40, 35, 40)
                 background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, 
                     intArrayOf(Color.parseColor("#0a1a2f"), Color.parseColor("#050A15"), Color.BLACK))
             }
+
             setupHeader(); setupHUD(); setupTerminal(); setupCentralLogo(); setupSOSButton(); setupActionButtons()
             setContentView(mainLayout)
-            startStatusMonitor(); handleSOSIntent(intent); handleIncomingData(intent)
-            registerReceiver(hudReceiver, IntentFilter("STARK_HUD_UPDATE"))
+            
+            startStatusMonitor()
+            handleSOSIntent(intent)
+            
+            registerReceiver(hudReceiver, IntentFilter("STARK_HUD_UPDATE"), Context.RECEIVER_EXPORTED)
         } catch (e: Exception) {
-            val errorView = TextView(this).apply { text = "ULTRA_ERR: ${e.message}" }
+            val errorView = TextView(this).apply { text = "STARK_ERR: ${e.message}" }
             setContentView(errorView)
         }
     }
@@ -100,7 +106,7 @@ class MainActivity : AppCompatActivity() {
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING"; textSize = 20f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD) })
-            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v68.1-SHIELD"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
+            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v69.0-EXCALIBUR"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
         }
         header.addView(titleLayout)
         val ledContainer = LinearLayout(this).apply {
@@ -115,7 +121,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupHUD() {
         val hudContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 15) }; background = getGlassDrawable(Color.parseColor("#3300FFFF")); setPadding(30, 25, 30, 25) }
-        hudContainer.addView(TextView(this).apply { text = "VIGILANCIA DE FLUJO ULTRA"; textSize = 8f; setTextColor(Color.GRAY); gravity = Gravity.CENTER })
+        hudContainer.addView(TextView(this).apply { text = "VIGILANCIA DE FLUJO EXCALIBUR"; textSize = 8f; setTextColor(Color.GRAY); gravity = Gravity.CENTER })
         lastClientLabel = TextView(this).apply { text = "ESPERANDO TRANSMISIÓN..."; textSize = 15f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER }
         lastAmountLabel = TextView(this).apply { text = "S/ 0.00"; textSize = 30f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER }
         hudContainer.addView(lastClientLabel); hudContainer.addView(lastAmountLabel); mainLayout.addView(hudContainer)
@@ -123,7 +129,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }; background = getGlassDrawable(Color.parseColor("#CC000000")); setPadding(25, 20, 25, 20) }
-        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay TITÁN v68.1 Active\n[INFO]: Protocolo SHIELD Iniciado"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
+        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay EXCALIBUR v69.0 Online"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) }); mainLayout.addView(termContainer)
     }
 
@@ -152,12 +158,9 @@ class MainActivity : AppCompatActivity() {
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
     }
 
-    private fun handleIncomingData(intent: Intent?) {
-        intent?.let { if (it.getBooleanExtra("CMD_PAYMENT", false)) { val name = it.getStringExtra("NAME") ?: ""; val amt = it.getStringExtra("AMT") ?: ""; if (name.isNotEmpty() && !name.contains("STARK")) { lastClientLabel?.text = name; lastAmountLabel?.text = "S/ $amt"; log("ULTRA_HUD: $name | S/ $amt") } } }
-    }
-
     private fun triggerVisualSOS() {
-        log("ALERTA: EMERGENCIA"); sosStopBtn?.visibility = View.VISIBLE; sosAnimator?.cancel()
+        sosStopBtn?.visibility = View.VISIBLE
+        sosAnimator?.cancel()
         sosAnimator = ValueAnimator.ofObject(ArgbEvaluator(), Color.RED, Color.TRANSPARENT).apply { duration = 500; repeatCount = 30; repeatMode = ValueAnimator.REVERSE; addUpdateListener { animator -> val color = animator.animatedValue as Int; mainLayout.background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(color, Color.BLACK)) }; addListener(object : android.animation.AnimatorListenerAdapter() { override fun onAnimationEnd(animation: android.animation.Animator) { stopSOSProtocol() } }) }
         sosAnimator?.start()
     }
@@ -169,21 +172,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun triggerCommand(key: Int) {
-        log("STARK_CMD: $key")
-        startService(Intent(this, DataSyncService::class.java).apply { 
+        log("STARK_CMD_ID: $key")
+        val i = Intent(this, DataSyncService::class.java).apply { 
             action = DataSyncService.MASTER_ACTION
             putExtra(DataSyncService.MASTER_KEY, key)
-        })
+        }
+        startService(i)
     }
 
     private fun vincularCodigo(data: String) { if (data.contains("wingpay_client")) { currentTopic = data; getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply(); log("VINCULACIÓN: OK"); relaunchService() } }
     private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) { log("ERR: Serv. inactivo") } }
-    private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC")
-            setBeepEnabled(true); setOrientationLocked(false) }) }
-    private fun log(text: String) { val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()); terminalView?.append("\n> [$time] $text") }
+    private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC"); setBeepEnabled(true); setOrientationLocked(false) }) }
+    private fun log(text: String) { 
+        val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+        terminalView?.post { terminalView?.append("\n> [$time] $text") }
+    }
     private fun startStatusMonitor() { mainScope.launch { while (isActive) { statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED); delay(3000) } } }
     private fun handleSOSIntent(intent: Intent?) { if (intent?.getBooleanExtra("VISUAL_SOS", false) == true) triggerVisualSOS() }
-    override fun onNewIntent(intent: Intent?) { super.onNewIntent(intent); handleSOSIntent(intent); handleIncomingData(intent) }
+    override fun onNewIntent(intent: Intent?) { super.onNewIntent(intent); handleSOSIntent(intent) }
     private fun getCircleDrawable(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
     private fun getGlassDrawable(color: Int) = GradientDrawable().apply { setColor(color); cornerRadius = 18f; setStroke(2, Color.parseColor("#4400FFFF")) }
     private fun createActionButton(txt: String, w: Float, action: () -> Unit) = Button(this).apply { text = txt; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, w).apply { setMargins(5, 5, 5, 5) }; background = GradientDrawable().apply { setColor(Color.parseColor("#2200FFFF")); cornerRadius = 12f; setStroke(1, Color.parseColor("#6600FFFF")) }; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); textSize = 11f; setOnClickListener { action() } }
