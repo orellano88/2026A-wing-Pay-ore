@@ -18,10 +18,10 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build with Gradle
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WingPay-Enterprise-v66.1-STARK-B
+          name: WingPay-Enterprise-v67.5-STARK-VIRGIN
           path: app/build/outputs/apk/debug/*.apk
