@@ -27,10 +27,10 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private lateinit var lock: PowerManager.WakeLock
     private var tts: TextToSpeech? = null
     private var ttsOk = false
-    private val queue = Collections.synchronizedList(mutableListOf<String>())
     
     private var topic: String = "wingpay_client_A2ZQV4"
     
+    // ESCUDOS DE SEGURIDAD
     private var lastProcessedSignature = ""
     private var lastProcessedTime = 0L
     private var lastSosTime = 0L
@@ -40,6 +40,11 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         internal var inst: DataSyncService? = null
         fun triggerSOS() { inst?.sendSOS() }
         fun isServiceRunning(): Boolean = inst != null
+        
+        // ACCIONES ÚNICAS (Blindaje total)
+        const val ACTION_SOS = "com.inversioneswing.wingpay.ACTION_SOS"
+        const val ACTION_POLICE = "com.inversioneswing.wingpay.ACTION_POLICE"
+        const val ACTION_TEST = "com.inversioneswing.wingpay.ACTION_TEST"
     }
 
     override fun onCreate() {
@@ -91,9 +96,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         lastSosTime = now
 
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-        am.setStreamVolume(AudioManager.STREAM_ALARM, maxVol, 0)
-        am.setStreamVolume(AudioManager.STREAM_MUSIC, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
+        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         
         val intent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -122,11 +125,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     fun stopSiren() {
-        try {
-            sirenTone?.stopTone()
-            val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-            v.cancel()
-        } catch (e: Exception) {}
+        try { sirenTone?.stopTone(); val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator; v.cancel() } catch (e: Exception) {}
     }
 
     fun speak(text: String) {
@@ -134,19 +133,17 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         if (ttsOk) {
             val params = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
             tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "ORE_" + System.currentTimeMillis())
-        } else queue.add(text)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        intent?.let {
-            when {
-                it.getBooleanExtra("CMD_SOS", false) -> sendSOS()
-                it.getBooleanExtra("CMD_POLICE", false) -> sendPoliceAlarm()
-                it.getBooleanExtra("CMD_PAYMENT", false) -> {
-                    val b = it.getStringExtra("BANK") ?: "TEST"
-                    val n = it.getStringExtra("NAME") ?: "STARK_NODE"
-                    val a = it.getStringExtra("AMT") ?: "0.10"
-                    dispatchPayment(b, n, a, "PAGO DE PRUEBA EXITOSO")
+        intent?.action?.let { action ->
+            when (action) {
+                ACTION_SOS -> sendSOS()
+                ACTION_POLICE -> sendPoliceAlarm()
+                ACTION_TEST -> {
+                    dispatchPayment("WING", "TEST_STARK", "0.10", "PAGO DE PRUEBA EXITOSO")
+                    speak("Inversiones Wing: Confirmando pulso de prueba. Sistema Operativo.")
                 }
             }
         }
@@ -158,9 +155,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         val signature = "$bank|$name|$amount"
         val now = System.currentTimeMillis()
         if (signature == lastProcessedSignature && (now - lastProcessedTime) < 5000) return
-        
-        lastProcessedSignature = signature
-        lastProcessedTime = now
+        lastProcessedSignature = signature; lastProcessedTime = now
 
         speak("$bank de $name por $amount soles.")
         serviceScope.launch { syncToMirror(bank, name, amount, elegantMsg) }
@@ -175,21 +170,17 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     fun sendPoliceAlarm() {
         val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
         
-        // 1. Forzar volumen máximo localmente
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         speak(msg)
 
-        // 2. Enviar señal a la PC para que también lo diga fuerte
         serviceScope.launch {
             try {
                 val url = URL("https://ntfy.sh/$topic")
                 (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"; doOutput = true
                     setRequestProperty("Content-Type", "application/json")
-                    val json = JSONObject().apply { 
-                        put("sender", "PHONE"); put("type", "SAY"); put("message", msg) 
-                    }
+                    val json = JSONObject().apply { put("sender", "PHONE"); put("type", "SAY"); put("message", msg) }
                     OutputStreamWriter(outputStream).use { it.write(json.toString()) }
                     responseCode; disconnect()
                 }
@@ -212,8 +203,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 if (m.find()) {
                     val amount = m.group(2)?.replace(",", "") ?: "0.00"
                     var sender = raw.replace(m.group(0)!!, "", true)
-                    val garbage = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|cod|op|ref|vta|\\||\\.|\\,|:|\\!|\\?|\\#|\\*)".toRegex()
-                    sender = sender.replace(garbage, " ").replace(Regex("\\d+"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
+                    val garbageWords = listOf("yapeaste", "recibiste", "transferencia", "de", "pago", "enviado", "recibido", "te envió", "soles", "notificación", "operación", "código", "nro", "id", "transacción", "dni", "banco", "ahorros", "corriente", "has", "un", "por", "a", "comisión", "ventas", "exitoso", "exitosa", "cod", "op", "ref", "vta", "yape")
+                    garbageWords.forEach { word -> sender = sender.replace(Regex("(?i)\\b$word\\b"), " ") }
+                    sender = sender.replace(Regex("\\b\\d+\\b"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
                     sender = sender.lowercase().split(" ").filter { it.length > 1 }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
                     if (sender.length < 3) sender = "Cliente Particular"
                     val bank = identifyBank(pkg, raw)
@@ -238,9 +230,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"; doOutput = true
                 setRequestProperty("Content-Type", "application/json")
-                val json = JSONObject().apply { 
-                    put("sender", "PHONE"); put("bank", b); put("name", n); put("amt", a); put("message", msg)
-                }
+                val json = JSONObject().apply { put("sender", "PHONE"); put("bank", b); put("name", n); put("amt", a); put("message", msg) }
                 OutputStreamWriter(outputStream).use { it.write(json.toString()) }
                 responseCode; disconnect()
             }

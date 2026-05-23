@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING"; textSize = 20f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD) })
-            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v66.7-GUARD"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
+            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v67.0-GOD-MODE"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
         }
         header.addView(titleLayout)
         val ledContainer = LinearLayout(this).apply {
@@ -107,7 +107,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }; background = getGlassDrawable(Color.parseColor("#CC000000")); setPadding(25, 20, 25, 20) }
-        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay Core v66.7 Active\n[INFO]: HUD Guardián Operativo"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
+        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay Core v67.0 Active\n[INFO]: Protocolo de Acciones Activo"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) }); mainLayout.addView(termContainer)
     }
 
@@ -128,7 +128,7 @@ class MainActivity : AppCompatActivity() {
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
         row1.addView(createActionButton("🛑 PC", 1f) { stopSOSProtocol() })
         row1.addView(createActionButton("🚨 SOS", 1f) { triggerSOS() })
-        row1.addView(createActionButton("⚠️ POLICÍA", 1f) { triggerPoliceAlarm() })
+        row1.addView(createActionButton("⚠️ POLICÍA", 1f) { triggerPolice() })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
         row2.addView(createActionButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         row2.addView(createActionButton("📷 QR", 1f) { openQRScanner() })
@@ -156,13 +156,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun vincularCodigo(data: String) { if (data.contains("wingpay_client")) { currentTopic = data; getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply(); log("VINCULACIÓN: OK"); relaunchService() } }
     private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) { log("ERR: Serv. inactivo") } }
-    private fun triggerTest() { log("CMD: TEST_PULSE"); startService(Intent(this, DataSyncService::class.java).apply { putExtra("CMD_PAYMENT", true); putExtra("BANK", "WING"); putExtra("NAME", "TEST_STARK"); putExtra("AMT", "0.10") }) }
-    private fun triggerSOS() { log("CMD: SOS_TO_PC"); startService(Intent(this, DataSyncService::class.java).apply { putExtra("CMD_SOS", true) }) }
-    private fun triggerPoliceAlarm() { 
-        log("ALERTA: DISUASIÓN POLICIAL")
-        val i = Intent(this, DataSyncService::class.java).apply { putExtra("CMD_POLICE", true) }
-        startService(i)
+    
+    // RECONSTRUCCIÓN DE COMANDOS (Protocolo de Acciones Únicas)
+    private fun triggerTest() { 
+        log("CMD: TEST")
+        startService(Intent(this, DataSyncService::class.java).apply { action = DataSyncService.ACTION_TEST }) 
     }
+    private fun triggerSOS() { 
+        log("CMD: SOS")
+        startService(Intent(this, DataSyncService::class.java).apply { action = DataSyncService.ACTION_SOS }) 
+    }
+    private fun triggerPolice() { 
+        log("CMD: POLICIA")
+        startService(Intent(this, DataSyncService::class.java).apply { action = DataSyncService.ACTION_POLICE }) 
+    }
+
     private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC"); setBeepEnabled(true); setOrientationLocked(false) }) }
     private fun log(text: String) { val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()); terminalView?.append("\n> [$time] $text") }
     private fun startStatusMonitor() { mainScope.launch { while (isActive) { statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED); delay(3000) } } }
