@@ -4,43 +4,28 @@ plugins {
 }
 
 android {
-    namespace 'com.inversioneswing.wingpay'
+    namespace 'com.inversioneswing.starkvirgin'
     compileSdk 34
 
     defaultConfig {
         applicationId "com.inversioneswing.starkvirgin"
-        minSdk 26
+        minSdk 24
         targetSdk 34
         versionCode 901
-        versionName "66.0-STARK-B"
+        versionName "67.5-STARK-VIRGIN"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-    }
-
-    signingConfigs {
-        release {
-            storeFile file("../wingpay.keystore")
-            storePassword "123456"
-            keyAlias "wing_alias"
-            keyPassword "123456"
-        }
     }
 
     buildTypes {
         release {
-            minifyEnabled true
+            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            signingConfig signingConfigs.release
-        }
-        debug {
-            signingConfig signingConfigs.release
         }
     }
-
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-
     kotlinOptions {
         jvmTarget = '17'
     }
