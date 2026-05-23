@@ -21,7 +21,7 @@ import java.util.regex.Pattern
 
 class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
-    private val CID = "STARK_ULTRA_GUARD_CHANNEL"
+    private val CID = "STARK_ZENITH_CHANNEL"
     private var job: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var lock: PowerManager.WakeLock
@@ -32,21 +32,25 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var lastSosTime = 0L
     private var sirenTone: ToneGenerator? = null
 
+    // PROTOCOLO ZENITH: Inhibidor de Interferencia
+    private var isAlarmActive = false
+
     companion object {
         internal var inst: DataSyncService? = null
         fun isServiceRunning(): Boolean = inst != null
         
-        // ACCIONES DE MANDO (Aislamiento Total)
-        const val ACTION_STARK_SOS = "STARK_ACTION_SOS_2026"
-        const val ACTION_STARK_POLICE = "STARK_ACTION_POLICE_2026"
-        const val ACTION_STARK_TEST = "STARK_ACTION_TEST_2026"
+        const val MASTER_ACTION = "com.stark.ZENITH_EXECUTE"
+        const val MASTER_KEY = "CMD_TYPE"
+        const val KEY_SOS = 1001
+        const val KEY_POLICE = 1002
+        const val KEY_TEST = 1003
     }
 
     override fun onCreate() {
         super.onCreate()
         inst = this
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:guardian_lock")
+        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:zenith_lock")
         if (!lock.isHeld) lock.acquire()
         tts = TextToSpeech(this, this)
         val prefs = getSharedPreferences("STARK_PREFS", MODE_PRIVATE)
@@ -80,31 +84,45 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun triggerLocalAlarm() {
         if (System.currentTimeMillis() - lastSosTime < 30000) return
         lastSosTime = System.currentTimeMillis()
+        isAlarmActive = true
+        
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+        
         startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP); putExtra("VISUAL_SOS", true) })
+
         sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
-        serviceScope.launch { repeat(8) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }; stopSiren() }
+        serviceScope.launch {
+            repeat(8) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }
+            stopSiren()
+            isAlarmActive = false
+        }
         speak("ALERTA STARK: REVISIÓN DE CÁMARAS OBLIGATORIA.")
     }
 
-    fun stopSiren() { sirenTone?.stopTone(); (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel() }
+    fun stopSiren() { 
+        sirenTone?.stopTone()
+        (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
+        isAlarmActive = false
+    }
 
-    fun speak(text: String, flush: Boolean = true) {
+    fun speak(text: String, priority: Boolean = true) {
         if (text.isEmpty() || !ttsOk) return
         val p = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
-        val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-        tts?.speak(text, mode, p, "STARK_" + System.currentTimeMillis())
+        val mode = if (priority) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+        tts?.speak(text, mode, p, "ZENITH_" + System.currentTimeMillis())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_STARK_SOS -> sendSOS()
-            ACTION_STARK_POLICE -> sendPoliceAlarm()
-            ACTION_STARK_TEST -> {
-                speak("STARK SYSTEM ONLINE. ENLACE OMEGA VERIFICADO.")
-                dispatchHUD("PRUEBA_EXITOSA", "1.00", "STARK")
-                syncToMirror("STARK_GUARD", "SISTEMA", "1.00", "ENLACE_OK")
+        if (intent?.action == MASTER_ACTION) {
+            when (intent.getIntExtra(MASTER_KEY, 0)) {
+                KEY_SOS -> sendSOS()
+                KEY_POLICE -> sendPoliceAlarm()
+                KEY_TEST -> {
+                    speak("STARK SYSTEM ZENITH: ENLACE MAESTRO VERIFICADO.")
+                    dispatchHUD("PRUEBA_OK", "1.00", "STARK")
+                    syncToMirror("SYSTEM_STARK", "CHECK", "1.00", "ZENITH_TEST")
+                }
             }
         }
         setupForegroundNotification()
@@ -112,17 +130,19 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     fun sendPoliceAlarm() {
-        // MENSAJE POLICIAL EXACTO (Protocolo de 7 líneas)
-        val msg = "ATENCIÓN. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
+        isAlarmActive = true
+        val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
         
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         
-        // Limpiamos cualquier voz anterior y gritamos la advertencia
+        // El celular habla con prioridad absoluta
         speak(msg, true)
         
-        // Enviamos con etiqueta "STARK_ALERTA" para que la app la ignore si se auto-intercepta
-        syncToMirror("STARK_ALERTA", "GUARD_UNIT", "0", msg)
+        // Sincronización PC: Usamos etiquetas internas "SYSTEM" para que el lector del móvil las ignore
+        syncToMirror("SYSTEM_ALERTA", "SYSTEM_GUARD", "0", msg)
+        
+        serviceScope.launch { delay(20000); isAlarmActive = false }
     }
 
     private fun dispatchHUD(n: String, a: String, b: String) {
@@ -131,8 +151,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val pkg = sbn.packageName.lowercase()
-        // ESCUDO DE AUTO-IGNORADO: No leer notificaciones de NTFY ni las que contengan nuestras etiquetas
-        if (pkg.contains("ntfy")) return
+        // SI HAY ALARMA ACTIVA O ES NUESTRO PROPIO MENSAJE, NO LEER
+        if (isAlarmActive || pkg.contains("ntfy")) return
         
         if (listOf("yape", "plin", "bcp", "interbank", "bbva", "scotia", "banco", "pay").any { pkg.contains(it) }) {
             val ex = sbn.notification.extras
@@ -140,8 +160,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
             val raw = if (text.length > title.length) text else title
             
-            // Si el mensaje viene de nosotros mismos, lo matamos de inmediato
-            if (raw.contains("STARK") || raw.contains("ALERTA") || raw.contains("GUARD")) return
+            // ESCUDO TOTAL: Si el texto contiene señales de nuestro sistema, ignorar
+            if (raw.contains("SYSTEM_") || raw.contains("STARK")) return
 
             val m = Pattern.compile("(?i)(S/\\s*|S\\.\\s*|S\\s*|soles\\s*)([\\d,]+\\.\\d{2}|[\\d,]+)").matcher(raw)
             if (m.find()) {
@@ -188,9 +208,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun setupForegroundNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val m = getSystemService(NotificationManager::class.java)
-            m.createNotificationChannel(NotificationChannel(CID, "STARK_ULTRA", NotificationManager.IMPORTANCE_LOW))
+            m.createNotificationChannel(NotificationChannel(CID, "STARK_ZENITH", NotificationManager.IMPORTANCE_LOW))
         }
-        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark Ultra Guard Online").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
+        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark Zenith System Active").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) startForeground(2026, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
         else startForeground(2026, n)
     }
