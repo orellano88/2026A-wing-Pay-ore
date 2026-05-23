@@ -21,7 +21,7 @@ import java.util.regex.Pattern
 
 class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
-    private val CID = "WING_ORE_SYNC_CH_2026"
+    private val CID = "STARK_CORE_2026_FINAL"
     private var job: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var lock: PowerManager.WakeLock
@@ -36,19 +36,19 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         internal var inst: DataSyncService? = null
         fun isServiceRunning(): Boolean = inst != null
         
-        // PROTOCOLO OMEGA: Comandos Numéricos Únicos (Blindaje de Kernel)
-        const val ACTION_STARK_CMD = "com.inversioneswing.wingpay.STARK_CMD"
-        const val EXTRA_CMD_ID = "CMD_ID"
-        const val CMD_SOS = 7701
-        const val CMD_POLICE = 7702
-        const val CMD_TEST = 7703
+        // PROTOCOLO ATÓMICO: Sin etiquetas de texto, solo llaves de sistema
+        const val MASTER_ACTION = "com.stark.ACTION_EXECUTE"
+        const val MASTER_KEY = "STARK_KEY"
+        const val KEY_SOS = 1001
+        const val KEY_POLICE = 1002
+        const val KEY_TEST = 1003
     }
 
     override fun onCreate() {
         super.onCreate()
         inst = this
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wingpay:omega_lock")
+        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:omega")
         if (!lock.isHeld) lock.acquire()
         tts = TextToSpeech(this, this)
         val prefs = getSharedPreferences("STARK_PREFS", MODE_PRIVATE)
@@ -65,17 +65,17 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     val conn = URL(endpoint).openConnection() as HttpURLConnection
                     conn.readTimeout = 0
                     conn.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line -> if (line.isNotBlank()) processRemoteCommand(line) }
+                        lines.forEach { line -> if (line.isNotBlank()) processRemote(line) }
                     }
                 } catch (e: Exception) { delay(5000) }
             }
         }
     }
 
-    private fun processRemoteCommand(line: String) {
+    private fun processRemote(line: String) {
         try {
-            val json = JSONObject(JSONObject(line).getString("message"))
-            if (json.optString("sender") == "PC" && json.optString("type") == "SOS") triggerLocalAlarm()
+            val j = JSONObject(JSONObject(line).getString("message"))
+            if (j.optString("sender") == "PC" && j.optString("type") == "SOS") triggerLocalAlarm()
         } catch (e: Exception) {}
     }
 
@@ -85,42 +85,34 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP); putExtra("VISUAL_SOS", true) })
-        val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500), 0))
         sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
-        serviceScope.launch {
-            repeat(10) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }
-            stopSiren()
-        }
-        speak("¡ALERTA SÍSMICA STARK! LOCAL BAJO AMENAZA. REVISIÓN DE CÁMARAS.")
+        serviceScope.launch { repeat(8) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }; stopSiren() }
+        speak("ALERTA STARK: REVISIÓN DE CÁMARAS EN CURSO.")
     }
 
-    fun stopSiren() { 
-        sirenTone?.stopTone()
-        (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel() 
-    }
+    fun stopSiren() { sirenTone?.stopTone(); (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel() }
 
     fun speak(text: String) {
         if (text.isEmpty() || !ttsOk) return
-        val params = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "OMEGA_" + System.currentTimeMillis())
+        val p = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, p, "ID_" + System.currentTimeMillis())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STARK_CMD) {
-            when (intent.getIntExtra(EXTRA_CMD_ID, 0)) {
-                CMD_SOS -> sendSOS()
-                CMD_POLICE -> {
-                    val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino."
-                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+        if (intent?.action == MASTER_ACTION) {
+            when (intent.getIntExtra(MASTER_KEY, 0)) {
+                KEY_SOS -> sendSOS()
+                KEY_POLICE -> {
+                    // CAMBIO RADICAL DE LENGUAJE: ALERTA ROJA
+                    val msg = "¡ALERTA ROJA! PROTOCOLO DE DISUASIÓN ACTIVO. RETÍRESE DE ESTA ZONA. LA POLICÍA HA SIDO NOTIFICADA Y SUS ROSTROS ESTÁN SIENDO ESCANEADOS EN VIVO."
                     speak(msg)
-                    syncToMirror("POLICIA", "STARK_GUARD", "0", msg)
+                    syncToMirror("POLICIA", "STARK_SHIELD", "0", msg)
                 }
-                CMD_TEST -> {
-                    speak("SISTEMA STARK: CONFIRMANDO PULSO DE PRUEBA. ENLACE OMEGA ACTIVO.")
-                    dispatchHUD("TEST_STARK", "0.10", "WING")
-                    syncToMirror("WING", "TEST_STARK", "0.10", "PAGO DE PRUEBA")
+                KEY_TEST -> {
+                    // CAMBIO RADICAL: DEPÓSITO
+                    speak("SISTEMA OMEGA EN LÍNEA. VERIFICACIÓN DE DEPÓSITO EXITOSA.")
+                    dispatchHUD("PRUEBA_STARK", "1.00", "STARK")
+                    syncToMirror("STARK", "VERIFICACION", "1.00", "OMEGA_TEST")
                 }
             }
         }
@@ -146,9 +138,11 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 sender = sender.replace(Regex("\\b\\d+\\b"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
                 sender = sender.lowercase().split(" ").filter { it.length > 1 }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
                 val bank = identifyBank(pkg, raw)
-                speak("CRÉDITO DE... $sender POR $amount SOLES EN $bank.")
+                
+                // CAMBIO RADICAL: DEPÓSITO DETECTADO
+                speak("DEPÓSITO DE... $sender POR $amount SOLES EN $bank.")
                 dispatchHUD(sender, amount, bank)
-                syncToMirror(bank, sender, amount, "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING")
+                syncToMirror(bank, sender, amount, "DEPÓSITO CONFIRMADO: DE... $sender POR S/ $amount. INVERSIONES WING.")
             }
         }
     }
@@ -181,9 +175,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun setupForegroundNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val m = getSystemService(NotificationManager::class.java)
-            m.createNotificationChannel(NotificationChannel(CID, "Sync", NotificationManager.IMPORTANCE_LOW))
+            m.createNotificationChannel(NotificationChannel(CID, "Security", NotificationManager.IMPORTANCE_LOW))
         }
-        val n = NotificationCompat.Builder(this, CID).setContentTitle("WingPay Omega Active").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
+        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark Omega Active").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) startForeground(2026, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
         else startForeground(2026, n)
     }
