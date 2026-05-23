@@ -139,13 +139,15 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         intent?.let {
-            if (it.getBooleanExtra("CMD_SOS", false)) sendSOS()
-            if (it.getBooleanExtra("CMD_POLICE", false)) sendPoliceAlarm() // ORDEN CLARA PARA EL BOTÓN POLICIAL
-            if (it.getBooleanExtra("CMD_PAYMENT", false)) {
-                val b = it.getStringExtra("BANK") ?: "TEST"
-                val n = it.getStringExtra("NAME") ?: "STARK_NODE"
-                val a = it.getStringExtra("AMT") ?: "0.10"
-                dispatchPayment(b, n, a, "PAGO DE PRUEBA EXITOSO")
+            when {
+                it.getBooleanExtra("CMD_SOS", false) -> sendSOS()
+                it.getBooleanExtra("CMD_POLICE", false) -> sendPoliceAlarm()
+                it.getBooleanExtra("CMD_PAYMENT", false) -> {
+                    val b = it.getStringExtra("BANK") ?: "TEST"
+                    val n = it.getStringExtra("NAME") ?: "STARK_NODE"
+                    val a = it.getStringExtra("AMT") ?: "0.10"
+                    dispatchPayment(b, n, a, "PAGO DE PRUEBA EXITOSO")
+                }
             }
         }
         setupForegroundNotification()

@@ -158,7 +158,11 @@ class MainActivity : AppCompatActivity() {
     private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) { log("ERR: Serv. inactivo") } }
     private fun triggerTest() { log("CMD: TEST_PULSE"); startService(Intent(this, DataSyncService::class.java).apply { putExtra("CMD_PAYMENT", true); putExtra("BANK", "WING"); putExtra("NAME", "TEST_STARK"); putExtra("AMT", "0.10") }) }
     private fun triggerSOS() { log("CMD: SOS_TO_PC"); startService(Intent(this, DataSyncService::class.java).apply { putExtra("CMD_SOS", true) }) }
-    private fun triggerPoliceAlarm() { log("ALERTA: DISUASIÓN POLICIAL"); DataSyncService.inst?.sendPoliceAlarm() }
+    private fun triggerPoliceAlarm() { 
+        log("ALERTA: DISUASIÓN POLICIAL")
+        val i = Intent(this, DataSyncService::class.java).apply { putExtra("CMD_POLICE", true) }
+        startService(i)
+    }
     private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC"); setBeepEnabled(true); setOrientationLocked(false) }) }
     private fun log(text: String) { val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()); terminalView?.append("\n> [$time] $text") }
     private fun startStatusMonitor() { mainScope.launch { while (isActive) { statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED); delay(3000) } } }
