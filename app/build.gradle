@@ -8,10 +8,10 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.inversioneswing.wingpay"
+        applicationId "com.inversioneswing.starkvirgin"
         minSdk 26
         targetSdk 34
-        versionCode 807
+        versionCode 901
         versionName "66.0-STARK-B"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
