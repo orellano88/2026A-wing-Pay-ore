@@ -31,8 +31,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var topic: String = "wingpay_client_A2ZQV4"
     private var lastSosTime = 0L
     private var sirenTone: ToneGenerator? = null
-
-    // PROTOCOLO ZENITH: Inhibidor de Interferencia
     private var isAlarmActive = false
 
     companion object {
@@ -67,14 +65,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     val conn = URL(endpoint).openConnection() as HttpURLConnection
                     conn.readTimeout = 0
                     conn.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line -> if (line.isNotBlank()) processRemote(line) }
+                        lines.forEach { line -> if (line.isNotBlank()) processRemoteCommand(line) }
                     }
                 } catch (e: Exception) { delay(5000) }
             }
         }
     }
 
-    private fun processRemote(line: String) {
+    private fun processRemoteCommand(line: String) {
         try {
             val j = JSONObject(JSONObject(line).getString("message"))
             if (j.optString("sender") == "PC" && j.optString("type") == "SOS") triggerLocalAlarm()
@@ -82,14 +80,32 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun triggerLocalAlarm() {
-        if (System.currentTimeMillis() - lastSosTime < 30000) return
+        if (System.currentTimeMillis() - lastSosTime < 20000) return
         lastSosTime = System.currentTimeMillis()
         isAlarmActive = true
         
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+
+        // PROTOCOLO DESPERTAR: Encender pantalla físicamente
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val screenLock = pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "stark:emergency_screen")
+        screenLock.acquire(15000)
+
+        // LANZAMIENTO DE ACTIVIDAD SOBRE BLOQUEO
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            putExtra("VISUAL_SOS", true)
+        }
         
-        startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP); putExtra("VISUAL_SOS", true) })
+        // Full Screen Intent para Android 14
+        val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        showEmergencyNotification(pendingIntent)
+
+        startActivity(intent)
+
+        val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500), 0))
 
         sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
         serviceScope.launch {
@@ -97,7 +113,22 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             stopSiren()
             isAlarmActive = false
         }
-        speak("ALERTA STARK: REVISIÓN DE CÁMARAS OBLIGATORIA.")
+        speak("¡ALERTA SÍSMICA STARK! REVISIÓN DE CÁMARAS OBLIGATORIA.")
+    }
+
+    private fun showEmergencyNotification(fullScreenIntent: PendingIntent) {
+        val n = NotificationCompat.Builder(this, CID)
+            .setSmallIcon(android.R.drawable.ic_delete)
+            .setContentTitle("🚨 EMERGENCIA CRÍTICA")
+            .setContentText("TOQUE PARA DETENER LA ALERTA")
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setFullScreenIntent(fullScreenIntent, true)
+            .setAutoCancel(true)
+            .build()
+        
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(777, n)
     }
 
     fun stopSiren() { 
@@ -109,8 +140,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     fun speak(text: String, priority: Boolean = true) {
         if (text.isEmpty() || !ttsOk) return
         val p = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
-        val mode = if (priority) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-        tts?.speak(text, mode, p, "ZENITH_" + System.currentTimeMillis())
+        tts?.speak(text, if (priority) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, p, "STARK_" + System.currentTimeMillis())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -131,17 +161,11 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     fun sendPoliceAlarm() {
         isAlarmActive = true
-        val msg = "ATENCION. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
-        
+        val msg = "ATENCIÓN. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
-        
-        // El celular habla con prioridad absoluta
         speak(msg, true)
-        
-        // Sincronización PC: Usamos etiquetas internas "SYSTEM" para que el lector del móvil las ignore
         syncToMirror("SYSTEM_ALERTA", "SYSTEM_GUARD", "0", msg)
-        
         serviceScope.launch { delay(20000); isAlarmActive = false }
     }
 
@@ -151,18 +175,13 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val pkg = sbn.packageName.lowercase()
-        // SI HAY ALARMA ACTIVA O ES NUESTRO PROPIO MENSAJE, NO LEER
         if (isAlarmActive || pkg.contains("ntfy")) return
-        
         if (listOf("yape", "plin", "bcp", "interbank", "bbva", "scotia", "banco", "pay").any { pkg.contains(it) }) {
             val ex = sbn.notification.extras
             val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
             val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
             val raw = if (text.length > title.length) text else title
-            
-            // ESCUDO TOTAL: Si el texto contiene señales de nuestro sistema, ignorar
             if (raw.contains("SYSTEM_") || raw.contains("STARK")) return
-
             val m = Pattern.compile("(?i)(S/\\s*|S\\.\\s*|S\\s*|soles\\s*)([\\d,]+\\.\\d{2}|[\\d,]+)").matcher(raw)
             if (m.find()) {
                 val amount = m.group(2)?.replace(",", "") ?: "0.00"
@@ -172,7 +191,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 sender = sender.replace(Regex("\\b\\d+\\b"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
                 sender = sender.lowercase().split(" ").filter { it.length > 1 }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
                 val bank = identifyBank(pkg, raw)
-                
                 speak("DEPÓSITO DE... $sender POR $amount SOLES EN $bank.", false)
                 dispatchHUD(sender, amount, bank)
                 syncToMirror(bank, sender, amount, "DEPÓSITO CONFIRMADO: DE... $sender POR S/ $amount. INVERSIONES WING.")
@@ -208,9 +226,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun setupForegroundNotification() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val m = getSystemService(NotificationManager::class.java)
-            m.createNotificationChannel(NotificationChannel(CID, "STARK_ZENITH", NotificationManager.IMPORTANCE_LOW))
+            m.createNotificationChannel(NotificationChannel(CID, "STARK", NotificationManager.IMPORTANCE_LOW))
         }
-        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark Zenith System Active").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
+        val n = NotificationCompat.Builder(this, CID).setContentTitle("Stark Omega Online").setSmallIcon(android.R.drawable.ic_secure).setOngoing(true).build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) startForeground(2026, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
         else startForeground(2026, n)
     }

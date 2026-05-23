@@ -17,6 +17,8 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
+import android.app.KeyguardManager
 import android.widget.*
 import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.app.AlertDialog
@@ -60,6 +62,20 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // PROTOCOLO DESPERTAR: Forzar visibilidad sobre bloqueo
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
+            km.requestDismissKeyguard(this, null)
+        } else {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON)
+        }
+
         try {
             val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
             currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
@@ -84,7 +100,7 @@ class MainActivity : AppCompatActivity() {
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING"; textSize = 20f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD) })
-            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v67.7-TITAN-ULTRA"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
+            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v68.1-SHIELD"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
         }
         header.addView(titleLayout)
         val ledContainer = LinearLayout(this).apply {
@@ -107,7 +123,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }; background = getGlassDrawable(Color.parseColor("#CC000000")); setPadding(25, 20, 25, 20) }
-        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay TITÁN v67.7 Active\n[INFO]: Protocolo Ultra Iniciado"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
+        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay TITÁN v68.1 Active\n[INFO]: Protocolo SHIELD Iniciado"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) }); mainLayout.addView(termContainer)
     }
 
@@ -127,12 +143,12 @@ class MainActivity : AppCompatActivity() {
         val btnLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
         row1.addView(createActionButton("🛑 PC", 1f) { stopSOSProtocol() })
-        row1.addView(createActionButton("🚨 SOS", 1f) { triggerCommand(DataSyncService.ACTION_STARK_SOS) })
-        row1.addView(createActionButton("⚠️ POLICÍA", 1f) { triggerCommand(DataSyncService.ACTION_STARK_POLICE) })
+        row1.addView(createActionButton("🚨 SOS", 1f) { triggerCommand(DataSyncService.KEY_SOS) })
+        row1.addView(createActionButton("⚠️ POLICÍA", 1f) { triggerCommand(DataSyncService.KEY_POLICE) })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
         row2.addView(createActionButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
         row2.addView(createActionButton("📷 QR", 1f) { openQRScanner() })
-        row2.addView(createActionButton("🧪 TEST", 1f) { triggerCommand(DataSyncService.ACTION_STARK_TEST) })
+        row2.addView(createActionButton("🧪 TEST", 1f) { triggerCommand(DataSyncService.KEY_TEST) })
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
     }
 
@@ -152,14 +168,18 @@ class MainActivity : AppCompatActivity() {
         log("SISTEMA: SILENCIADO"); DataSyncService.inst?.stopSiren()
     }
 
-    private fun triggerCommand(actionStr: String) {
-        log("STARK_CMD: $actionStr")
-        startService(Intent(this, DataSyncService::class.java).apply { action = actionStr })
+    private fun triggerCommand(key: Int) {
+        log("STARK_CMD: $key")
+        startService(Intent(this, DataSyncService::class.java).apply { 
+            action = DataSyncService.MASTER_ACTION
+            putExtra(DataSyncService.MASTER_KEY, key)
+        })
     }
 
     private fun vincularCodigo(data: String) { if (data.contains("wingpay_client")) { currentTopic = data; getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply(); log("VINCULACIÓN: OK"); relaunchService() } }
     private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) { log("ERR: Serv. inactivo") } }
-    private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC"); setBeepEnabled(true); setOrientationLocked(false) }) }
+    private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC")
+            setBeepEnabled(true); setOrientationLocked(false) }) }
     private fun log(text: String) { val time = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date()); terminalView?.append("\n> [$time] $text") }
     private fun startStatusMonitor() { mainScope.launch { while (isActive) { statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED); delay(3000) } } }
     private fun handleSOSIntent(intent: Intent?) { if (intent?.getBooleanExtra("VISUAL_SOS", false) == true) triggerVisualSOS() }
