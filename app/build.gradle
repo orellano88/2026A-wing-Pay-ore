@@ -11,7 +11,7 @@ android {
         applicationId "com.inversioneswing.wingpay"
         minSdk 26
         targetSdk 34
-        versionCode 804
+        versionCode 805
         versionName "66.0-STARK-B"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
