@@ -34,19 +34,21 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     companion object {
         internal var inst: DataSyncService? = null
-        fun triggerSOS() { inst?.sendSOS() }
         fun isServiceRunning(): Boolean = inst != null
         
-        const val ACTION_SOS = "STARK_ACTION_SOS_CRITICAL"
-        const val ACTION_POLICE = "STARK_ACTION_POLICE_DISUASION"
-        const val ACTION_TEST = "STARK_ACTION_TEST_LINK"
+        // PROTOCOLO OMEGA: Comandos Numéricos Únicos (Blindaje de Kernel)
+        const val ACTION_STARK_CMD = "com.inversioneswing.wingpay.STARK_CMD"
+        const val EXTRA_CMD_ID = "CMD_ID"
+        const val CMD_SOS = 7701
+        const val CMD_POLICE = 7702
+        const val CMD_TEST = 7703
     }
 
     override fun onCreate() {
         super.onCreate()
         inst = this
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wingpay:wakeup")
+        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wingpay:omega_lock")
         if (!lock.isHeld) lock.acquire()
         tts = TextToSpeech(this, this)
         val prefs = getSharedPreferences("STARK_PREFS", MODE_PRIVATE)
@@ -61,6 +63,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             while (isActive) {
                 try {
                     val conn = URL(endpoint).openConnection() as HttpURLConnection
+                    conn.readTimeout = 0
                     conn.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line -> if (line.isNotBlank()) processRemoteCommand(line) }
                     }
@@ -79,44 +82,46 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun triggerLocalAlarm() {
         if (System.currentTimeMillis() - lastSosTime < 30000) return
         lastSosTime = System.currentTimeMillis()
-        
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
-        
         startActivity(Intent(this, MainActivity::class.java).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP); putExtra("VISUAL_SOS", true) })
-
         val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 1000, 500), 0))
-        
         sirenTone = ToneGenerator(AudioManager.STREAM_ALARM, 100)
         serviceScope.launch {
-            repeat(8) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }
+            repeat(10) { sirenTone?.startTone(ToneGenerator.TONE_SUP_ERROR, 800); delay(1500) }
             stopSiren()
         }
         speak("¡ALERTA SÍSMICA STARK! LOCAL BAJO AMENAZA. REVISIÓN DE CÁMARAS.")
     }
 
-    fun stopSiren() { sirenTone?.stopTone(); (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel() }
+    fun stopSiren() { 
+        sirenTone?.stopTone()
+        (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel() 
+    }
 
     fun speak(text: String) {
         if (text.isEmpty() || !ttsOk) return
         val params = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
-        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "STARK_" + System.currentTimeMillis())
+        tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, "OMEGA_" + System.currentTimeMillis())
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_SOS -> sendSOS()
-            ACTION_POLICE -> {
-                // VOZ POLICIAL - PRIORIDAD 100
-                val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino. Repito: unidad de patrullaje en camino."
-                speak(msg)
-                syncToMirror("POLICIA", "STARK_GUARD", "0", msg)
-            }
-            ACTION_TEST -> {
-                speak("SISTEMA STARK: CONFIRMANDO PULSO DE PRUEBA. ENLACE OMEGA ACTIVO.")
-                dispatchHUD("TEST_STARK", "0.10", "WING")
-                syncToMirror("WING", "TEST_STARK", "0.10", "PAGO DE PRUEBA")
+        if (intent?.action == ACTION_STARK_CMD) {
+            when (intent.getIntExtra(EXTRA_CMD_ID, 0)) {
+                CMD_SOS -> sendSOS()
+                CMD_POLICE -> {
+                    val msg = "⚠️ ATENCIÓN ⚠️. Se ha activado la alarma de seguridad. La policía ya fue notificada y las cámaras están transmitiendo en vivo. Retírense inmediatamente. Sus rostros ya fueron registrados. Unidad de patrullaje en camino."
+                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+                    speak(msg)
+                    syncToMirror("POLICIA", "STARK_GUARD", "0", msg)
+                }
+                CMD_TEST -> {
+                    speak("SISTEMA STARK: CONFIRMANDO PULSO DE PRUEBA. ENLACE OMEGA ACTIVO.")
+                    dispatchHUD("TEST_STARK", "0.10", "WING")
+                    syncToMirror("WING", "TEST_STARK", "0.10", "PAGO DE PRUEBA")
+                }
             }
         }
         setupForegroundNotification()
@@ -132,18 +137,15 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         if (listOf("yape", "plin", "bcp", "interbank", "bbva", "scotia", "banco", "pay").any { pkg.contains(it) }) {
             val ex = sbn.notification.extras
             val raw = listOf(ex.getCharSequence(Notification.EXTRA_TITLE), ex.getCharSequence(Notification.EXTRA_TEXT), ex.getCharSequence(Notification.EXTRA_BIG_TEXT)).maxByOrNull { it?.length ?: 0 }?.toString() ?: ""
-            
             val m = Pattern.compile("(?i)(S/\\s*|S\\.\\s*|S\\s*|soles\\s*)([\\d,]+\\.\\d{2}|[\\d,]+)").matcher(raw)
             if (m.find()) {
                 val amount = m.group(2)?.replace(",", "") ?: "0.00"
                 var sender = raw.replace(m.group(0)!!, "", true)
-                val garbage = "(?i)(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|cod|op|ref|vta|yape)".toRegex()
-                garbage.split("|").forEach { sender = sender.replace(Regex("(?i)\\b$it\\b"), " ") }
+                val garbage = listOf("yapeaste", "recibiste", "transferencia", "de", "pago", "enviado", "recibido", "te envió", "soles", "notificación", "operación", "código", "nro", "id", "transacción", "dni", "banco", "ahorros", "corriente", "has", "un", "por", "a", "comisión", "ventas", "exitoso", "exitosa", "cod", "op", "ref", "vta", "yape")
+                garbage.forEach { word -> sender = sender.replace(Regex("(?i)\\b$word\\b"), " ") }
                 sender = sender.replace(Regex("\\b\\d+\\b"), " ").replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
                 sender = sender.lowercase().split(" ").filter { it.length > 1 }.joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
-                
                 val bank = identifyBank(pkg, raw)
-                // NUEVA VOZ: "CRÉDITO" EN LUGAR DE "PAGO" PARA CONFIRMAR VERSIÓN
                 speak("CRÉDITO DE... $sender POR $amount SOLES EN $bank.")
                 dispatchHUD(sender, amount, bank)
                 syncToMirror(bank, sender, amount, "CONFIRMACIÓN DE PAGO: DE... $sender TE ENVIÓ UN PAGO POR $amount SOLES. GRACIAS POR CONFIAR EN INVERSIONES WING")
