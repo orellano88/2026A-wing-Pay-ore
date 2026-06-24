@@ -13,4 +13,4 @@ fi
 
 export PATH="$GRADLE_DIR/bin:$PATH"
 echo "JARVIS: Motor Gradle 8.5 En Línea. Iniciando Forjado del APK..."
-gradle assembleDebug --stacktrace
+gradle "$@"

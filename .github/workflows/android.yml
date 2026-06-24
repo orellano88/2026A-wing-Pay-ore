@@ -27,15 +27,6 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: List and Commit Build Outputs
-        run: |
-          find app/build -type f > build_outputs.txt || echo "find failed" > build_outputs.txt
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add build_outputs.txt
-          git commit -m "🔍 DEBUG: build outputs list" || true
-          git push
-
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
