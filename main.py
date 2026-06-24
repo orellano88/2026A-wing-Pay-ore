@@ -26,8 +26,8 @@ class WingPayBridge(FloatLayout):
 1}, padding=[15, 10])
         # Título Corporativo
         title_box = BoxLayout(orientation='vertical')
-        title_box.add_widget(Label(text="[b][color=00FFFF]IMPORTACIONES WING[/color][/b]", markup=True, font_size='22sp'))
-        title_box.add_widget(Label(text="2026 MASTER UNIVERSAL v66.0-STARK-B", font_size='11sp', color=(1, 1, 1, 0.8)))
+        title_box.add_widget(Label(text="[b][color=2ECC71]IMPORTACIONES WING •[/color][/b]", markup=True, font_size='22sp'))
+        title_box.add_widget(Label(text="¡BIENVENIDO, USUARIO! | Optimización de Inversiones", font_size='11sp', color=(1, 1, 1, 0.8)))
         header.add_widget(title_box)
         self.add_widget(header)
 
@@ -37,9 +37,15 @@ class WingPayBridge(FloatLayout):
             Color(0, 0.05, 0.1, 0.9)
             self.bg_cons = RoundedRectangle(size=self.console_box.size, pos=self.console_box.pos, radius=[15])
         
-        self.log_label = Label(text="[color=00FF00][SYSTEM]: WingPay Core v66.0 Online
-[SYNC]: Esperando Transacciones...[/color]",
-                               markup=True, font_size='12sp', halign='left', valign='top', padding=[20, 20])
+        startup_text = (
+            "[color=00FF00]"
+            "[SISTEMA]: WingInversiones / Importaciones Wing Online\n"
+            "[LOG]: WingInversiones Core v70.0 - Secure\n"
+            "[STATUS]: Portfolio Active • Verified\n"
+            "[STATUS]: Import Channel Open • Secure\n"
+            "[SYNC]: Esperando Transacciones...[/color]"
+        )
+        self.log_label = Label(text=startup_text, markup=True, font_size='12sp', halign='left', valign='top', padding=[20, 20])
         self.log_label.bind(size=self.log_label.setter('text_size'))
         self.console_box.add_widget(self.log_label)
         self.add_widget(self.console_box)
@@ -157,8 +163,7 @@ class WingPayBridge(FloatLayout):
         except Exception as e:
             self.update_log(f"[INFO]: Modo PC/Simulación (No Android Service)")
     def scan_qr_pc(self, instance):
-        # Simulación de escaneo: En producción activa la cámara para leer la IP:Port de la 
-PC
+        # Simulación de escaneo: En producción activa la cámara para leer la IP:Port de la PC
         self.pc_ip = "192.168.1.100" # Ejemplo de IP capturada por QR
         self.update_log(f"[VINCULADO]: Conectado a PC en {self.pc_ip}")
     def send_to_pc(self, payload):
@@ -176,8 +181,7 @@ PC
         self.send_to_pc({"tipo": "PING", "msg": "Dispositivo activo"})
         self.update_log("[TEST]: Pulso de conexión enviado")
     def update_log(self, text):
-        self.log_label.text += f"
-[color=00FF00]{text}[/color]"
+        self.log_label.text += f"\n[color=00FF00]{text}[/color]"
 class WingPayApp(App):
     def build(self):
         return WingPayBridge()
