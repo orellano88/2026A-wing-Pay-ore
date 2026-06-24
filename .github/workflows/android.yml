@@ -27,6 +27,9 @@ jobs:
       - name: Build with Gradle
         run: ./gradlew assembleRelease --no-daemon
 
+      - name: List Build Outputs
+        run: find app/build -type f || true
+
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
