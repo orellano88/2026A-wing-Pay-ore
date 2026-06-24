@@ -1,5 +1,12 @@
-name: Build WingPay APK
-on: [push]
+name: Build and Release WingPay APK
+on:
+  push:
+    branches: [ "main" ]
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -18,10 +25,18 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build with Gradle
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleRelease --no-daemon
 
-      - name: Upload APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: WingPay-Enterprise-v70.0-LEGACY-KILLER
-          path: app/build/outputs/apk/debug/*.apk
+          name: WingPay-Enterprise-Release
+          path: app/build/outputs/apk/release/*.apk
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
