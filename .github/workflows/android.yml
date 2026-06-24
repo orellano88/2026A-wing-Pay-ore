@@ -23,5 +23,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: WingPay-Enterprise-v69.0-EXCALIBUR
+          name: WingPay-Enterprise-v70.0-LEGACY-KILLER
           path: app/build/outputs/apk/debug/*.apk

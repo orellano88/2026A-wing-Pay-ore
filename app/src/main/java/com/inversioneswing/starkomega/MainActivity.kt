@@ -51,10 +51,19 @@ class MainActivity : AppCompatActivity() {
                 val amt = it.getStringExtra("AMT") ?: ""
                 val bank = it.getStringExtra("BANK") ?: "PAGO"
                 lastClientLabel?.post { 
-                    lastClientLabel?.text = "$bank DE... $name"
+                    lastClientLabel?.text = "ÚLTIMO DEPÓSITO ($bank) - $name"
                     lastAmountLabel?.text = "S/ $amt"
+                    
+                    // Color dinámico según el banco para look premium
+                    val bankColor = when(bank.uppercase()) {
+                        "YAPE" -> "#FF007F" // Rosa/Morado Yape
+                        "PLIN" -> "#00E5FF" // Celeste Plin
+                        "BCP" -> "#FFC107"  // Amarillo BCP
+                        else -> "#00FFFF"   // Cyan estándar
+                    }
+                    lastAmountLabel?.setTextColor(Color.parseColor(bankColor))
                 }
-                log("HUD: $bank ACTUALIZADO")
+                log("PAGO RECIBIDO: $bank DE $name POR S/ $amt")
             }
         }
     }
@@ -107,34 +116,71 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupHeader() {
-        val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,20) } }
+        val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,25) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING"; textSize = 20f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD) })
-            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v69.0-EXCALIBUR"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.7f })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING MONITOR DE PAGOS"; textSize = 16f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v70.0-LEGACY-KILLER"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.6f })
         }
         header.addView(titleLayout)
         val ledContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
             layoutParams = RelativeLayout.LayoutParams(-2, -2).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT); addRule(RelativeLayout.CENTER_VERTICAL) }
-            statusLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(42, 42).apply { setMargins(10, 0, 10, 0) }; background = getCircleDrawable(Color.RED) }
-            syncLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(42, 42).apply { setMargins(10, 0, 10, 0) }; background = getCircleDrawable(Color.GRAY) }
-            addView(statusLED); addView(syncLED)
+            
+            // LED de Servicio
+            statusLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(24, 24); background = getCircleDrawable(Color.RED) }
+            val statusText = TextView(this@MainActivity).apply { text = "SERVICIO"; textSize = 9f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); setPadding(10, 0, 15, 0); alpha = 0.8f }
+            
+            // LED de Sincronización
+            syncLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(24, 24); background = getCircleDrawable(Color.GRAY) }
+            val syncText = TextView(this@MainActivity).apply { text = "TÚNEL"; textSize = 9f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); setPadding(10, 0, 0, 0); alpha = 0.8f }
+            
+            addView(statusLED); addView(statusText)
+            addView(syncLED); addView(syncText)
         }
         header.addView(ledContainer); mainLayout.addView(header)
     }
 
     private fun setupHUD() {
-        val hudContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 15) }; background = getGlassDrawable(Color.parseColor("#3300FFFF")); setPadding(30, 25, 30, 25) }
-        hudContainer.addView(TextView(this).apply { text = "VIGILANCIA DE FLUJO EXCALIBUR"; textSize = 8f; setTextColor(Color.GRAY); gravity = Gravity.CENTER })
-        lastClientLabel = TextView(this).apply { text = "ESPERANDO TRANSMISIÓN..."; textSize = 15f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER }
-        lastAmountLabel = TextView(this).apply { text = "S/ 0.00"; textSize = 30f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER }
-        hudContainer.addView(lastClientLabel); hudContainer.addView(lastAmountLabel); mainLayout.addView(hudContainer)
+        val hudContainer = LinearLayout(this).apply { 
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 20) }
+            background = getGlassDrawable(Color.parseColor("#1500FFFF"))
+            setPadding(35, 30, 35, 30) 
+        }
+        
+        val cardHeader = RelativeLayout(this).apply { 
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 12) } 
+        }
+        val flowLabel = TextView(this).apply { 
+            text = "MONITOR DE PAGOS EXCALIBUR"; textSize = 9f; setTextColor(Color.parseColor("#8800FFFF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) 
+        }
+        cardHeader.addView(flowLabel)
+        hudContainer.addView(cardHeader)
+
+        // Línea divisora
+        val divider = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, 2).apply { setMargins(0, 0, 0, 15) }
+            setBackgroundColor(Color.parseColor("#2200FFFF"))
+        }
+        hudContainer.addView(divider)
+        
+        lastClientLabel = TextView(this).apply { 
+            text = "ESPERANDO TRANSMISIÓN..."; textSize = 15f; setTextColor(Color.WHITE); setTypeface(Typeface.DEFAULT_BOLD); gravity = Gravity.CENTER 
+        }
+        lastAmountLabel = TextView(this).apply { 
+            text = "S/ 0.00"; textSize = 36f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)); gravity = Gravity.CENTER 
+        }
+        
+        hudContainer.addView(lastClientLabel)
+        hudContainer.addView(lastAmountLabel)
+        mainLayout.addView(hudContainer)
     }
 
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }; background = getGlassDrawable(Color.parseColor("#CC000000")); setPadding(25, 20, 25, 20) }
-        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay EXCALIBUR v69.0 Online"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
+        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay EXCALIBUR v70.0 Online"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) }); mainLayout.addView(termContainer)
     }
 

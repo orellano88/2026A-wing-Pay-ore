@@ -120,14 +120,21 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == MASTER_ACTION) {
-            when (intent.getIntExtra(MASTER_KEY, 0)) {
-                KEY_SOS -> sendSOS()
-                KEY_POLICE -> executePoliceProtocol()
-                KEY_TEST -> {
-                    speak("STARK SYSTEM ONLINE. ENLACE VERIFICADO.")
-                    dispatchHUD("PRUEBA_EXITOSA", "1.00", "STARK")
-                    syncToMirror("STARK_CHECK", "SYSTEM", "1.00", "VERIFICACION")
+        intent?.let {
+            val newTopic = it.getStringExtra("UPDATE_CODE") ?: ""
+            if (newTopic.isNotEmpty() && newTopic != topic) {
+                topic = newTopic
+                startPhantomListener()
+            }
+            if (it.action == MASTER_ACTION) {
+                when (it.getIntExtra(MASTER_KEY, 0)) {
+                    KEY_SOS -> sendSOS()
+                    KEY_POLICE -> executePoliceProtocol()
+                    KEY_TEST -> {
+                        speak("STARK SYSTEM ONLINE. ENLACE VERIFICADO.")
+                        dispatchHUD("PRUEBA_EXITOSA", "1.00", "STARK")
+                        syncToMirror("STARK_CHECK", "SYSTEM", "1.00", "VERIFICACION")
+                    }
                 }
             }
         }
