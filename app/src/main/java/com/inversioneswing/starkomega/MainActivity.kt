@@ -130,7 +130,7 @@ class MainActivity : AppCompatActivity() {
             
             // LED de Servicio
             statusLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(24, 24); background = getCircleDrawable(Color.RED) }
-            val statusText = TextView(this@MainActivity).apply { text = "SERVICIO"; textSize = 9f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); setPadding(10, 0, 15, 0); alpha = 0.8f }
+            val statusText = TextView(this@MainActivity).apply { text = "SERVICO"; textSize = 9f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); setPadding(10, 0, 15, 0); alpha = 0.8f }
             
             // LED de Sincronización
             syncLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(24, 24); background = getCircleDrawable(Color.GRAY) }
@@ -228,13 +228,13 @@ class MainActivity : AppCompatActivity() {
     private fun setupActionButtons() {
         val btnLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
-        row1.addView(createActionButton("🛑 PC", 1f) { stopSOSProtocol() })
-        row1.addView(createActionButton("🚨 SOS", 1f) { triggerCommand(DataSyncService.KEY_SOS) })
-        row1.addView(createActionButton("⚠️ POLICÍA", 1f) { triggerCommand(DataSyncService.KEY_POLICE) })
+        row1.addView(createActionButton("📡\nPC", 1f) { stopSOSProtocol() })
+        row1.addView(createActionButton("🚨\nSOS", 1f) { triggerCommand(DataSyncService.KEY_SOS) })
+        row1.addView(createActionButton("👮\nPOLICÍA", 1f) { triggerCommand(DataSyncService.KEY_POLICE) })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
-        row2.addView(createActionButton("⚙", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
-        row2.addView(createActionButton("📷 QR", 1f) { openQRScanner() })
-        row2.addView(createActionButton("🧪 TEST", 1f) { triggerCommand(DataSyncService.KEY_TEST) })
+        row2.addView(createActionButton("⚙️\nAJUSTES", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+        row2.addView(createActionButton("📷\nQR", 1f) { openQRScanner() })
+        row2.addView(createActionButton("🔌\nTEST", 1f) { triggerCommand(DataSyncService.KEY_TEST) })
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
     }
 
@@ -272,6 +272,20 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent?) { super.onNewIntent(intent); handleSOSIntent(intent) }
     private fun getCircleDrawable(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
     private fun getGlassDrawable(color: Int) = GradientDrawable().apply { setColor(color); cornerRadius = 18f; setStroke(2, Color.parseColor("#4400FFFF")) }
-    private fun createActionButton(txt: String, w: Float, action: () -> Unit) = Button(this).apply { text = txt; layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, w).apply { setMargins(5, 5, 5, 5) }; background = GradientDrawable().apply { setColor(Color.parseColor("#2200FFFF")); cornerRadius = 12f; setStroke(1, Color.parseColor("#6600FFFF")) }; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD); textSize = 11f; setOnClickListener { action() } }
+    private fun createActionButton(txt: String, w: Float, action: () -> Unit) = Button(this).apply {
+        text = txt
+        val heightPx = (80 * resources.displayMetrics.density).toInt()
+        layoutParams = LinearLayout.LayoutParams(0, heightPx, w).apply { setMargins(6, 6, 6, 6) }
+        background = GradientDrawable().apply {
+            setColor(Color.parseColor("#1500FFFF"))
+            cornerRadius = 18f
+            setStroke(2, Color.parseColor("#4400FFFF"))
+        }
+        setTextColor(Color.WHITE)
+        setTypeface(null, Typeface.BOLD)
+        textSize = 10f
+        gravity = Gravity.CENTER
+        setOnClickListener { action() }
+    }
     override fun onDestroy() { mainScope.cancel(); try { unregisterReceiver(hudReceiver) } catch (e: Exception) {}; super.onDestroy() }
 }
