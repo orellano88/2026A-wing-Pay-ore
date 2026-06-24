@@ -119,8 +119,8 @@ class MainActivity : AppCompatActivity() {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,25) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING MONITOR DE PAGOS"; textSize = 16f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "2026 MASTER STARK v70.0-LEGACY-KILLER"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.6f })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING •"; textSize = 20f; setTextColor(Color.parseColor("#2ECC71")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "¡BIENVENIDO, USUARIO! | Optimización de Inversiones"; textSize = 10f; setTextColor(Color.WHITE); alpha = 0.6f })
         }
         header.addView(titleLayout)
         val ledContainer = LinearLayout(this).apply {
@@ -154,7 +154,7 @@ class MainActivity : AppCompatActivity() {
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 12) } 
         }
         val flowLabel = TextView(this).apply { 
-            text = "MONITOR DE PAGOS EXCALIBUR"; textSize = 9f; setTextColor(Color.parseColor("#8800FFFF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) 
+            text = "MONITOR DE PAGOS WING_ULTRA"; textSize = 9f; setTextColor(Color.parseColor("#8800FFFF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) 
         }
         cardHeader.addView(flowLabel)
         hudContainer.addView(cardHeader)
@@ -167,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         hudContainer.addView(divider)
         
         lastClientLabel = TextView(this).apply { 
-            text = "ESPERANDO TRANSMISIÓN..."; textSize = 15f; setTextColor(Color.WHITE); setTypeface(Typeface.DEFAULT_BOLD); gravity = Gravity.CENTER 
+            text = "MONITOREANDO TRANSACCIONES..."; textSize = 15f; setTextColor(Color.WHITE); setTypeface(Typeface.DEFAULT_BOLD); gravity = Gravity.CENTER 
         }
         lastAmountLabel = TextView(this).apply { 
             text = "S/ 0.00"; textSize = 36f; setTextColor(Color.parseColor("#00FFFF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)); gravity = Gravity.CENTER 
@@ -180,14 +180,43 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTerminal() {
         val termContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 350).apply { setMargins(0, 10, 0, 10) }; background = getGlassDrawable(Color.parseColor("#CC000000")); setPadding(25, 20, 25, 20) }
-        terminalView = TextView(this).apply { text = "[SISTEMA]: WingPay EXCALIBUR v70.0 Online"; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
+        val startupLog = """
+            [SISTEMA]: WingInversiones / Importaciones Wing Online
+            [LOG]: WingInversiones Core v70.0 - Secure
+            [STATUS]: Portfolio Active • Verified
+            [STATUS]: Import Channel Open • Secure
+        """.trimIndent()
+        terminalView = TextView(this).apply { text = startupLog; textSize = 10f; setTextColor(Color.parseColor("#00FF41")); setTypeface(Typeface.MONOSPACE) }
         termContainer.addView(ScrollView(this).apply { addView(terminalView) }); mainLayout.addView(termContainer)
     }
 
     private fun setupCentralLogo() {
-        val visualContainer = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, 0, 1f) }
-        centralLogo = ImageView(this).apply { layoutParams = FrameLayout.LayoutParams(350, 350, Gravity.CENTER); setImageResource(R.drawable.stark_logo); alpha = 0.6f }
-        centralLogo?.let { ObjectAnimator.ofFloat(it, "alpha", 0.4f, 0.8f).apply { duration = 2000; repeatCount = -1; repeatMode = ValueAnimator.REVERSE; start() }; visualContainer.addView(it) }
+        val visualContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f)
+        }
+        centralLogo = ImageView(this).apply { 
+            layoutParams = LinearLayout.LayoutParams(280, 280)
+            setImageResource(R.drawable.stark_logo)
+            alpha = 0.6f 
+        }
+        centralLogo?.let { 
+            ObjectAnimator.ofFloat(it, "alpha", 0.4f, 0.8f).apply { 
+                duration = 2000; repeatCount = -1; repeatMode = ValueAnimator.REVERSE; start() 
+            }
+            visualContainer.addView(it) 
+        }
+        val logoLabel = TextView(this).apply {
+            text = "WING INVERSIONES"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            alpha = 0.6f
+            setTypeface(null, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 10, 0, 0) }
+        }
+        visualContainer.addView(logoLabel)
         mainLayout.addView(visualContainer)
     }
 
