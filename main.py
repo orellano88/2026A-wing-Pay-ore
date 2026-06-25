@@ -111,7 +111,7 @@ class WingPayBridge(FloatLayout):
         self.btn_sos.bind(on_press=self.trigger_sos_manual)
         btn_layout.add_widget(self.btn_sos)
         
-        btn_layout.add_widget(Button(text="👮\n[b]POLICÍA[/b]", **btn_style, on_press=lambda x: self.update_log("[SISTEMA]: Alarma policial enviada")))
+        btn_layout.add_widget(Button(text="👮\n[b]POLICÍA[/b]", **btn_style, on_press=lambda x: self.send_intent_to_service(5002)))
         
         # Fila 2
         btn_layout.add_widget(Button(text="⚙️\n[b]AJUSTES[/b]", **btn_style, on_press=lambda x: self.update_log("[SISTEMA]: Ajustes de seguridad")))
@@ -125,9 +125,22 @@ class WingPayBridge(FloatLayout):
         import math
         self.logo.opacity = 0.3 + 0.3 * math.sin(Clock.get_time() * 2)
 
+    def send_intent_to_service(self, command_key):
+        try:
+            from jnius import autoclass
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Intent = autoclass('android.content.Intent')
+            service = autoclass('com.inversioneswing.starkomega.DataSyncService')
+            intent = Intent(PythonActivity.mActivity, service)
+            intent.setAction("com.stark.MASTER_EXECUTE")
+            intent.putExtra("STARK_COMMAND", int(command_key))
+            PythonActivity.mActivity.startService(intent)
+            self.update_log(f"[SISTEMA]: Comando {command_key} enviado al servicio.")
+        except Exception as e:
+            self.update_log(f"[INFO]: Comando {command_key} en simulación.")
+
     def trigger_sos_manual(self, instance):
-        self.send_to_pc({"tipo": "SOS", "msg": "ALERTA CRÍTICA MÓVIL"})
-        self.update_log("[ALERTA]: SOS enviado a la PC")
+        self.send_intent_to_service(5001)
         self.start_sos_visual()
 
     def start_sos_visual(self, *args):
@@ -222,10 +235,10 @@ class WingPayBridge(FloatLayout):
         except Exception as e:
             self.update_log(f"[ERROR]: Falla de red: {e}")
     def send_sos(self, instance):
-        self.send_to_pc({"tipo": "SOS", "msg": "ALERTA CRÍTICA MÓVIL"})
+        self.send_intent_to_service(5001)
         self.update_log("[ALERTA]: SOS enviado a la PC")
     def send_ping(self, instance):
-        self.send_to_pc({"tipo": "PING", "msg": "Dispositivo activo"})
+        self.send_intent_to_service(5003)
         self.update_log("[TEST]: Pulso de conexión enviado")
     def update_log(self, text):
         self.log_label.text += f"\n[color=00FF00]{text}[/color]"
