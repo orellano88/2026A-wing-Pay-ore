@@ -269,8 +269,46 @@ class MainActivity : AppCompatActivity() {
             minLines = 2
             maxLines = 4
         }
+        
+        val quickMessages = listOf(
+            "⚠️ Emergencia en caja" to "#FF4444",
+            "💵 Necesito sencillo" to "#FFC107",
+            "🤝 Cliente esperando" to "#2ECC71",
+            "🔎 Revisar cámaras" to "#00E5FF"
+        )
+        
+        val quickLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 10) }
+        }
+        
+        val horizontalScroll = HorizontalScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 10) }
+            addView(quickLayout)
+        }
+        
+        for ((text, colorHex) in quickMessages) {
+            val pill = Button(this).apply {
+                this.text = text
+                textSize = 10f
+                setTextColor(Color.WHITE)
+                background = GradientDrawable().apply {
+                    setColor(Color.parseColor("#15FFFFFF"))
+                    cornerRadius = 30f
+                    setStroke(2, Color.parseColor(colorHex))
+                }
+                setPadding(25, 12, 25, 12)
+                layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(10, 0, 10, 0) }
+                setOnClickListener {
+                    input.setText(text.substring(2)) // Elimina el emoji inicial
+                }
+            }
+            quickLayout.addView(pill)
+        }
+        
         container.addView(label)
         container.addView(input)
+        container.addView(horizontalScroll)
 
         val dialog = AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
             .setView(container)
