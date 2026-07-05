@@ -124,6 +124,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val newTopic = it.getStringExtra("UPDATE_CODE") ?: ""
             if (newTopic.isNotEmpty() && newTopic != topic) {
                 topic = newTopic
+                getSharedPreferences("STARK_PREFS", MODE_PRIVATE).edit().putString("CLIENT_CODE", topic).apply()
                 startPhantomListener()
             }
             if (it.action == MASTER_ACTION) {

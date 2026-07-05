@@ -217,9 +217,15 @@ class WingPayBridge(FloatLayout):
             Intent = autoclass('android.content.Intent')
             service = autoclass('com.inversioneswing.starkomega.DataSyncService')
             intent = Intent(PythonActivity.mActivity, service)
-            intent.putExtra("UPDATE_CODE", "wingpay_client_A2ZQV4")
+            
+            # Read last configured topic from SharedPreferences to avoid overriding it with default
+            context = PythonActivity.mActivity
+            prefs = context.getSharedPreferences("STARK_PREFS", 0) # 0 is MODE_PRIVATE
+            saved_code = prefs.getString("CLIENT_CODE", "wingpay_client_A2ZQV4")
+            
+            intent.putExtra("UPDATE_CODE", saved_code)
             PythonActivity.mActivity.startService(intent)
-            self.update_log("[SISTEMA]: Servicio de Sincronización ORE ACTIVO")
+            self.update_log(f"[SISTEMA]: Servicio de Sincronización ORE ACTIVO ({saved_code})")
         except Exception as e:
             self.update_log(f"[INFO]: Modo PC/Simulación (No Android Service)")
     def scan_qr_pc(self, instance):

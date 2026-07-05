@@ -260,7 +260,16 @@ class MainActivity : AppCompatActivity() {
         startService(i)
     }
 
-    private fun vincularCodigo(data: String) { if (data.contains("wingpay_client")) { currentTopic = data; getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply(); log("VINCULACIÓN: OK"); relaunchService() } }
+    private fun vincularCodigo(data: String) { 
+        if (data.contains("wingpay")) { 
+            currentTopic = data
+            getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply()
+            log("VINCULACIÓN: OK")
+            relaunchService() 
+        } else {
+            log("ERR: Código no válido")
+        }
+    }
     private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) { log("ERR: Serv. inactivo") } }
     private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO PC"); setBeepEnabled(true); setOrientationLocked(false) }) }
     private fun log(text: String) { 
