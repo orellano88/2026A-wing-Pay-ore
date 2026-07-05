@@ -228,7 +228,7 @@ class MainActivity : AppCompatActivity() {
     private fun setupActionButtons() {
         val btnLayout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(-1, -2) }
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
-        row1.addView(createActionButton("📡\nPC", 1f) { stopSOSProtocol() })
+        row1.addView(createActionButton("📡\nPC", 1f) { showVoiceMessageDialog() })
         row1.addView(createActionButton("🚨\nSOS", 1f) { triggerCommand(DataSyncService.KEY_SOS) })
         row1.addView(createActionButton("👮\nPOLICÍA", 1f) { triggerCommand(DataSyncService.KEY_POLICE) })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
@@ -236,6 +236,63 @@ class MainActivity : AppCompatActivity() {
         row2.addView(createActionButton("📷\nQR", 1f) { openQRScanner() })
         row2.addView(createActionButton("🔌\nTEST", 1f) { triggerCommand(DataSyncService.KEY_TEST) })
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
+    }
+
+    private fun showVoiceMessageDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(50, 40, 50, 20)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#0a1a2f"))
+                cornerRadius = 24f
+            }
+        }
+        val label = TextView(this).apply {
+            text = "📡 MENSAJE A LA PC"
+            textSize = 14f
+            setTextColor(Color.parseColor("#00FFFF"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 20) }
+        }
+        val input = EditText(this).apply {
+            hint = "Escribe tu mensaje aquí..."
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#15FFFFFF"))
+                cornerRadius = 14f
+                setStroke(2, Color.parseColor("#4400FFFF"))
+            }
+            setPadding(30, 25, 30, 25)
+            minLines = 2
+            maxLines = 4
+        }
+        container.addView(label)
+        container.addView(input)
+
+        val dialog = AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setPositiveButton("🔊 ENVIAR") { _, _ ->
+                val msg = input.text.toString().trim()
+                if (msg.isNotEmpty()) {
+                    val i = Intent(this, DataSyncService::class.java).apply {
+                        action = DataSyncService.MASTER_ACTION
+                        putExtra(DataSyncService.MASTER_KEY, DataSyncService.KEY_SAY)
+                        putExtra(DataSyncService.EXTRA_MESSAGE, msg)
+                    }
+                    startService(i)
+                    log("VOZ → PC: $msg")
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .create()
+        dialog.show()
+        // Estilizar los botones del diálogo
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(Color.parseColor("#00FFFF"))
+        dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(Color.parseColor("#888888"))
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
     }
 
     private fun triggerVisualSOS() {

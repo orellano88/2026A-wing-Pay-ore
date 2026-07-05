@@ -41,9 +41,11 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         
         const val MASTER_ACTION = "com.stark.MASTER_EXECUTE"
         const val MASTER_KEY = "STARK_COMMAND"
+        const val EXTRA_MESSAGE = "STARK_MESSAGE"
         const val KEY_SOS = 5001
         const val KEY_POLICE = 5002
         const val KEY_TEST = 5003
+        const val KEY_SAY = 5004
     }
 
     override fun onCreate() {
@@ -79,7 +81,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val j = JSONObject(JSONObject(line).getString("message"))
             // Ignorar comandos que nosotros mismos enviamos
             if (j.optString("sender") == "PHONE" || j.optString("sender") == "PHONE_PANIC") return
-            if (j.optString("sender") == "PC" && j.optString("type") == "SOS") triggerLocalAlarm()
+            val sender = j.optString("sender")
+            val type = j.optString("type")
+            if (sender == "PC" && type == "SOS") triggerLocalAlarm()
+            // PC envía un mensaje de voz al celular
+            if (sender == "PC" && type == "SAY") {
+                val msg = j.optString("message", "")
+                if (msg.isNotEmpty()) speak(msg, false)
+            }
         } catch (e: Exception) {}
     }
 
@@ -135,6 +144,10 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                         speak("STARK SYSTEM ONLINE. ENLACE VERIFICADO.")
                         dispatchHUD("PRUEBA_EXITOSA", "1.00", "STARK")
                         syncToMirror("STARK_CHECK", "SYSTEM", "1.00", "VERIFICACION")
+                    }
+                    KEY_SAY -> {
+                        val msg = it.getStringExtra(EXTRA_MESSAGE) ?: ""
+                        if (msg.isNotEmpty()) sendVoiceToPC(msg)
                     }
                 }
             }
@@ -231,6 +244,25 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             try {
                 val url = URL("https://ntfy.sh/$topic")
                 (url.openConnection() as HttpURLConnection).apply { requestMethod = "POST"; doOutput = true; setRequestProperty("Content-Type", "application/json"); val json = JSONObject().apply { put("sender", "PHONE"); put("type", "SOS") }; OutputStreamWriter(outputStream).use { it.write(json.toString()) }; responseCode; disconnect() }
+            } catch (e: Exception) {}
+        }
+    }
+
+    fun sendVoiceToPC(message: String) {
+        serviceScope.launch {
+            try {
+                val url = URL("https://ntfy.sh/$topic")
+                (url.openConnection() as HttpURLConnection).apply {
+                    requestMethod = "POST"; doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    val json = JSONObject().apply {
+                        put("sender", "PHONE")
+                        put("type", "SAY")
+                        put("message", message)
+                    }
+                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    responseCode; disconnect()
+                }
             } catch (e: Exception) {}
         }
     }
