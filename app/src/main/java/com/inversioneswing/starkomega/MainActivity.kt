@@ -163,88 +163,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val key = prefs.getString("LICENSE_KEY", "") ?: ""
         if (key.isEmpty()) {
             showLicenseActivationDialog(
-                "👑 ACTIVACIÓN IMPORTACIONES WING GOLD", 
+                "ACTIVACIÓN IMPORTACIONES WING", 
                 "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
             )
-        } else {
-            verifyLicenseWithGoogleSheet(key)
-        }
-    }
-
-    private fun verifyLicenseWithGoogleSheet(key: String) {
-        val currentDeviceId = getHardwareDeviceId()
-        mainScope.launch(Dispatchers.IO) {
-            var status = "OFFLINE_OK"
-            var expStr = ""
-            try {
-                val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
-                val urlObj = java.net.URL(csvUrl)
-                val conn = (urlObj.openConnection() as java.net.HttpURLConnection).apply {
-                    connectTimeout = 6000
-                    readTimeout = 6000
-                }
-                
-                val lines = conn.inputStream.bufferedReader().readLines()
-                var keyFound = false
-                var isExpired = false
-                var isDeviceBlocked = false
-
-                for (line in lines) {
-                    val cols = line.split(",").map { it.replace("\"", "").trim() }
-                    if (cols.size >= 2) {
-                        val rowCode = cols[1]
-                        val rowExpiration = cols.getOrNull(2) ?: ""
-                        val rowDeviceId = cols.getOrNull(4) ?: ""
-
-                        if (rowCode.equals(key, ignoreCase = true)) {
-                            keyFound = true
-                            expStr = rowExpiration
-
-                            if (rowExpiration.isEmpty()) {
-                                isExpired = true
-                                expStr = "SIN FECHA REGISTRADA"
-                            } else {
-                                try {
-                                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                                    val expDate = sdf.parse(rowExpiration)
-                                    val today = Date()
-                                    if (expDate != null && today.after(expDate)) {
-                                        isExpired = true
-                                    }
-                                } catch (e: Exception) {
-                                    isExpired = true
-                                }
-                            }
-
-                            if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
-                                isDeviceBlocked = true
-                            }
-
-                            break
-                        }
-                    }
-                }
-
-                if (!keyFound) status = "NOT_FOUND"
-                else if (isDeviceBlocked) status = "DEVICE_BLOCKED"
-                else if (isExpired) status = "EXPIRED"
-                else status = "VALID"
-
-            } catch (e: Exception) {
-                status = "OFFLINE_OK"
-            }
-
-            withContext(Dispatchers.Main) {
-                when (status) {
-                    "NOT_FOUND" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O NO REGISTRADA", "La clave '$key' no existe en el sistema de licencias de Google Sheets.\nContacte a Soporte WhatsApp (921665833).")
-                    "DEVICE_BLOCKED" -> showLicenseActivationDialog("📱 LICENCIA VINCULADA A OTRO CELULAR", "Esta licencia ya se encuentra activa en otro equipo.\nContacte a Soporte WhatsApp (921665833).")
-                    "EXPIRED" -> showLicenseActivationDialog("⏳ LICENCIA VENCIDA ($expStr)", "Su licencia ha vencido en el documento de control.\nContacte a Soporte WhatsApp (921665833).")
-                    else -> {
-                        getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
-                            .putString("LICENSE_KEY", key).apply()
-                    }
-                }
-            }
         }
     }
 
@@ -429,8 +350,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "👑 IMPORTACIONES WING PAGOS • v999.0 GOLD"; textSize = 16f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "¡BIENVENIDO! | CAJA GOLD WING • CANAL: $currentTopic"; textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.9f })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v80.0"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "CANAL DE CAJA: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f })
         }
         header.addView(titleLayout)
 
@@ -551,48 +472,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cardGranTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(15, 12, 15, 12)
-            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-                Color.parseColor("#44FFD700"),
-                Color.parseColor("#15000000"),
-                Color.parseColor("#66DAA520")
-            )).apply {
-                cornerRadius = 16f
-                setStroke(3, Color.parseColor("#FFD700"))
-            }
+            background = getGlassDrawable(Color.parseColor("#2500E5FF"), Color.parseColor("#AA00E5FF"))
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 8, 0, 0) }
         }
         val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
-        val lblGran = TextView(this).apply { text = "👑 RECAUDACIÓN DEL DÍA"; textSize = 11f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
+        val lblGran = TextView(this).apply { text = "💰 RECAUDACIÓN DEL DÍA"; textSize = 10f; setTextColor(Color.WHITE); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
         val btnExport = Button(this).apply {
             text = "📁 DESCARGAS CSV"
             textSize = 9f
-            setTextColor(Color.BLACK)
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#FFD700"))
-                cornerRadius = 12f
-            }
-            setTypeface(null, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
             layoutParams = RelativeLayout.LayoutParams(-2, (32 * resources.displayMetrics.density).toInt()).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
             setOnClickListener { exportCierreDeCajaCSV() }
         }
         headerRow.addView(lblGran)
         headerRow.addView(btnExport)
 
-        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 26f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.DEFAULT_BOLD) }
-        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.9f }
+        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 24f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.DEFAULT_BOLD) }
+        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.7f }
         
-        tvUltimoPago = TextView(this).apply {
-            text = "⚡ ÚLTIMO COBRO: Ninguno aún"
-            textSize = 10f
-            setTextColor(Color.parseColor("#FFD700"))
-            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-            setPadding(0, 8, 0, 0)
-        }
-
         cardGranTotal.addView(headerRow)
         cardGranTotal.addView(tvGranTotal)
         cardGranTotal.addView(tvCantPagos)
-        cardGranTotal.addView(tvUltimoPago)
 
         grid.addView(row1)
         grid.addView(row2)
@@ -688,13 +589,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
         tvCantPagos.text = "${todayPayments.size} cobro(s) registrados hoy (${paymentList.size} en 7 días)"
-        
-        if (paymentList.isNotEmpty()) {
-            val last = paymentList.last()
-            tvUltimoPago.text = "⚡ ÚLTIMO COBRO: ${last.bank} S/ ${String.format(Locale.US, "%.2f", last.amount)} - ${last.name} (${last.time})"
-        } else {
-            tvUltimoPago.text = "⚡ ÚLTIMO COBRO: Ninguno aún"
-        }
     }
 
     private fun showCompaneroPopup(bank: String, name: String, amount: String) {
@@ -916,7 +810,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 if (key.isNotEmpty()) {
                     licenseKey = key
                     getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("LICENSE_KEY", key).apply()
-                    verifyLicenseWithGoogleSheet(key)
+                    Toast.makeText(this, "Clave guardada: $key", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("Cerrar", null)
