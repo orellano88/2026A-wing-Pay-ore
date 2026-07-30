@@ -154,6 +154,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         startStatusMonitor()
         handleSOSIntent(intent)
 
+        val filter = IntentFilter("STARK_HUD_UPDATE")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(hudReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            registerReceiver(hudReceiver, filter)
+        }
+
         verifyLicenseWithGoogleSheet()
     }
 
@@ -573,7 +580,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v76.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v76.1"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             
             tvWelcomeUser = TextView(this@MainActivity).apply { 
                 text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
