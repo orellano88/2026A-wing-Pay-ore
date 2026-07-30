@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId "com.inversioneswing.starkomega"
-        minSdk 24
+        minSdk 21
         targetSdk 34
-        versionCode 3000
-        versionName "70.0-LEGACY-KILLER"
+        versionCode 99999
+        versionName "999.0-GOLD-FINAL"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -27,7 +27,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig signingConfigs.debug
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
