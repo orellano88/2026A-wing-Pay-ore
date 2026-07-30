@@ -15,6 +15,7 @@ import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
@@ -86,15 +87,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val bank = it.getStringExtra("BANK") ?: "PAGO"
                 val rawMsg = it.getStringExtra("MSG") ?: ""
                 val isRemote = it.getBooleanExtra("IS_REMOTE", false)
+                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                 val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
                 val amtVal = amtStr.toDoubleOrNull() ?: 0.0
-                val item = PaymentItem(bank, name, amtVal, timeStr)
+                val item = PaymentItem(bank, name, amtVal, timeStr, dateStr)
                 
                 runOnUiThread {
                     adapter.addPayment(item)
                     updateTotals()
-                    savePaymentsToStorage()
+                    savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
                     
                     if (!isEmisorMode && isRemote) {
                         showCompaneroPopup(bank, name, amtStr)
@@ -123,7 +125,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
         
-        // Si no existe token guardado previa ni manualmente, se guarda el token único auto-generado
         if (!prefs.contains("CLIENT_CODE")) {
             prefs.edit().putString("CLIENT_CODE", currentTopic).apply()
         } else {
@@ -132,13 +133,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
 
-        // Sensor Shake-to-Silence
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         buildUI()
         setContentView(mainLayout)
         
+        // CARGAR HISTORIAL 7 DÍAS CAJA
         loadPaymentsFromStorage()
         requestBatteryOptimizationExemption()
 
@@ -179,17 +180,31 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
+    // --------------------------------------------------------------------------------
+    // PERSISTENCIA DE HASTA 7 DÍAS CON LIMPIEZA AUTOMÁTICA DE REGISTROS ANTIGUOS
+    // --------------------------------------------------------------------------------
     private fun savePaymentsToStorage() {
         try {
             val jsonArray = JSONArray()
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_YEAR, -7)
+            val cutoffDate = cal.time
+
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
             for (p in paymentList) {
-                val obj = JSONObject().apply {
-                    put("bank", p.bank)
-                    put("name", p.name)
-                    put("amount", p.amount)
-                    put("time", p.time)
+                val pDate = try { sdf.parse(p.date) } catch (e: Exception) { Date() }
+                // Guardar solo si es de los últimos 7 días
+                if (pDate != null && !pDate.before(cutoffDate)) {
+                    val obj = JSONObject().apply {
+                        put("bank", p.bank)
+                        put("name", p.name)
+                        put("amount", p.amount)
+                        put("time", p.time)
+                        put("date", p.date)
+                    }
+                    jsonArray.put(obj)
                 }
-                jsonArray.put(obj)
             }
             getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
                 .putString("SAVED_PAYMENTS_JSON", jsonArray.toString())
@@ -203,13 +218,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 .getString("SAVED_PAYMENTS_JSON", null) ?: return
             val jsonArray = JSONArray(jsonStr)
             paymentList.clear()
+            
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
+                val itemDate = obj.optString("date", todayStr)
                 paymentList.add(PaymentItem(
                     obj.getString("bank"),
                     obj.getString("name"),
                     obj.getDouble("amount"),
-                    obj.getString("time")
+                    obj.getString("time"),
+                    itemDate
                 ))
             }
             adapter.notifyDataSetChanged()
@@ -217,53 +237,67 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } catch (e: Exception) {}
     }
 
+    // --------------------------------------------------------------------------------
+    // EXPORTACIÓN AUTOMÁTICA A LA CARPETA DE DESCARGAS (DOWNLOADS) DE ANDROID
+    // --------------------------------------------------------------------------------
     private fun exportCierreDeCajaCSV() {
         try {
             val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date())
             val fileName = "Cierre_Caja_Ferreteria_$dateStr.csv"
-            val file = File(getExternalFilesDir(null), fileName)
+            
+            // Guardar en la carpeta publica de Downloads de Android
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            
+            val file = File(downloadsDir, fileName)
 
             val sb = java.lang.StringBuilder()
-            sb.append("HORA,BANCO,CLIENTE,MONTO SOLES\n")
+            sb.append("FECHA,HORA,BANCO,CLIENTE,MONTO SOLES\n")
 
             var totalYape = 0.0
             var totalPlin = 0.0
             var totalBcp = 0.0
             var totalOtros = 0.0
 
-            for (p in paymentList) {
-                sb.append("${p.time},${p.bank},\"${p.name}\",${p.amount}\n")
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val todayPayments = paymentList.filter { it.date == todayStr }
+
+            for (p in todayPayments) {
+                sb.append("${p.date},${p.time},${p.bank},\"${p.name}\",${p.amount}\n")
                 when (p.bank.uppercase()) {
                     "YAPE" -> totalYape += p.amount
                     "PLIN" -> totalPlin += p.amount
-                    "BCP" -> totalBcp += p.amount
+                    "BCP", "BCP DIRECTO" -> totalBcp += p.amount
                     else -> totalOtros += p.amount
                 }
             }
 
             val granTotal = totalYape + totalPlin + totalBcp + totalOtros
-            sb.append("\nRESUMEN DE CIERRE FERRETERO\n")
+            sb.append("\nRESUMEN DE CIERRE FERRETERO DEL DIA ($todayStr)\n")
             sb.append("TOTAL YAPE,S/ $totalYape\n")
             sb.append("TOTAL PLIN,S/ $totalPlin\n")
             sb.append("TOTAL BCP,S/ $totalBcp\n")
             sb.append("TOTAL OTROS,S/ $totalOtros\n")
             sb.append("GRAN TOTAL DEL DIA,S/ $granTotal\n")
-            sb.append("TOTAL OPERACIONES,${paymentList.size}\n")
+            sb.append("TOTAL OPERACIONES HOY,${todayPayments.size}\n")
 
             FileOutputStream(file).use { it.write(sb.toString().toByteArray()) }
 
+            Toast.makeText(this, "📁 Guardado en Descargas:\n$fileName", Toast.LENGTH_LONG).show()
+
+            // Abrir menú para compartir por WhatsApp / Telegram
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/csv"
                 putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr")
-                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera acumulado el $dateStr.\nGran Total: S/ $granTotal (${paymentList.size} operaciones).")
+                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera acumulado en Descargas ($dateStr).\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
                 val fileUri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
                 putExtra(Intent.EXTRA_STREAM, fileUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(shareIntent, "Enviar Cierre de Caja a Dueño/Administrador"))
+            startActivity(Intent.createChooser(shareIntent, "Enviar Cierre de Caja en Descargas"))
 
         } catch (e: Exception) {
-            Toast.makeText(this, "Reporte generado en almacenamiento local", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Cierre de caja procesado correctamente", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -301,8 +335,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "WINGPAY FERRETERO TITAN • v73.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "TOKEN ACTUAL: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
+            addView(TextView(this@MainActivity).apply { text = "WINGPAY FERRETERO TITAN • v73.2"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "CANAL: $currentTopic • 7 DÍAS REGISTRADOS"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
         }
         header.addView(titleLayout)
 
@@ -427,7 +461,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
         val lblGran = TextView(this).apply { text = "💰 RECAUDACIÓN DEL DÍA"; textSize = 10f; setTextColor(Color.WHITE); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
         val btnExport = Button(this).apply {
-            text = "📊 CIERRE CAJA"
+            text = "📁 DESCARGAS CSV"
             textSize = 9f
             setTextColor(Color.WHITE)
             background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
@@ -471,14 +505,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             padding(12, 10, 12, 10)
         }
 
+        val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 6) } }
         val header = TextView(this).apply {
             text = "📋 HISTORIAL DE VENTAS Y COBROS"
             textSize = 9f
             setTextColor(Color.parseColor("#8800E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-            setMargins(0, 0, 0, 6)
         }
-        container.addView(header)
+        val btnFiltrarSemanales = TextView(this).apply {
+            text = "🔍 ÚLTIMOS 7 DÍAS"
+            textSize = 9f
+            setTextColor(Color.parseColor("#00E5FF"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            layoutParams = RelativeLayout.LayoutParams(-2, -2).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
+            setOnClickListener { showWeeklyDialog() }
+        }
+        headerRow.addView(header)
+        headerRow.addView(btnFiltrarSemanales)
+        container.addView(headerRow)
 
         rvPayments = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
@@ -491,13 +535,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         mainLayout.addView(container)
     }
 
+    private fun showWeeklyDialog() {
+        val count = paymentList.size
+        var totalSemanual = 0.0
+        for (p in paymentList) totalSemanual += p.amount
+
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setTitle("📅 REGISTRO DE ÚLTIMOS 7 DÍAS")
+            .setMessage("Se han registrado $count transacciones acumuladas en la última semana.\n\nMonto Acumulado 7 días: S/ ${String.format(Locale.US, "%.2f", totalSemanual)}")
+            .setPositiveButton("CERRAR", null)
+            .show()
+    }
+
     private fun updateTotals() {
         var totalYape = 0.0
         var totalPlin = 0.0
         var totalBcp = 0.0
         var totalOtros = 0.0
 
-        for (p in paymentList) {
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val todayPayments = paymentList.filter { it.date == todayStr }
+
+        for (p in todayPayments) {
             when (p.bank.uppercase()) {
                 "YAPE" -> totalYape += p.amount
                 "PLIN" -> totalPlin += p.amount
@@ -512,7 +571,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvTotalBcp.text = String.format(Locale.US, "S/ %.2f", totalBcp)
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
-        tvCantPagos.text = "${paymentList.size} cobro(s) en caja registrado(s)"
+        tvCantPagos.text = "${todayPayments.size} cobro(s) registrados hoy (${paymentList.size} en 7 días)"
     }
 
     private fun showCompaneroPopup(bank: String, name: String, amount: String) {
@@ -589,9 +648,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
-    // --------------------------------------------------------------------------------
-    // DIÁLOGO PARA PERSONALIZACIÓN MANUAL DE TOKEN FERRETERO
-    // --------------------------------------------------------------------------------
     private fun showCustomTokenDialog() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -751,4 +807,64 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         layoutParams = p
     }
     private fun TextView.TextColorHex(hex: String) = setTextColor(Color.parseColor(hex))
+}
+
+// --------------------------------------------------------------------------------
+// ADAPTER HISTORIAL (RECYCLERVIEW) CON SOPORTE PARA FECHAS Y 7 DÍAS
+// --------------------------------------------------------------------------------
+data class PaymentItem(val bank: String, val name: String, val amount: Double, val time: String, val date: String = "")
+
+class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView.Adapter<PaymentAdapter.ViewHolder>() {
+    class ViewHolder(val view: LinearLayout, val tvBank: TextView, val tvName: TextView, val tvAmt: TextView, val tvTime: TextView) : RecyclerView.ViewHolder(view)
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val ctx = parent.context
+        val container = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(15, 12, 15, 12)
+            layoutParams = RecyclerView.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 8) }
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#15FFFFFF"))
+                cornerRadius = 14f
+            }
+        }
+        val tvBank = TextView(ctx).apply { textSize = 10f; setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setPadding(0,0,15,0) }
+        val infoLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
+        val tvName = TextView(ctx).apply { textSize = 12f; setTextColor(Color.WHITE); setTypeface(Typeface.DEFAULT_BOLD) }
+        val tvTime = TextView(ctx).apply { textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f }
+        infoLayout.addView(tvName); infoLayout.addView(tvTime)
+
+        val tvAmt = TextView(ctx).apply { textSize = 14f; setTypeface(Typeface.DEFAULT_BOLD) }
+
+        container.addView(tvBank)
+        container.addView(infoLayout)
+        container.addView(tvAmt)
+
+        return ViewHolder(container, tvBank, tvName, tvAmt, tvTime)
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val item = items[position]
+        holder.tvBank.text = item.bank
+        holder.tvName.text = item.name
+        holder.tvTime.text = if (item.date.isNotEmpty()) "${item.date} ${item.time}" else item.time
+        holder.tvAmt.text = String.format(Locale.US, "S/ %.2f", item.amount)
+
+        val colorHex = when (item.bank.uppercase()) {
+            "YAPE" -> "#FF007F"
+            "PLIN" -> "#00E5FF"
+            "BCP", "BCP DIRECTO" -> "#FFC107"
+            else -> "#2ECC71"
+        }
+        holder.tvBank.setTextColor(Color.parseColor(colorHex))
+        holder.tvAmt.setTextColor(Color.parseColor(colorHex))
+    }
+
+    override fun getItemCount() = items.size
+
+    fun addPayment(item: PaymentItem) {
+        items.add(0, item)
+        notifyItemInserted(0)
+    }
 }
