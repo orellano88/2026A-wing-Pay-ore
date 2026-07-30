@@ -139,7 +139,12 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         buildUI()
-        setContentView(mainLayout)
+        val rootScroll = ScrollView(this).apply {
+            layoutParams = ViewGroup.LayoutParams(-1, -1)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#0F141C"), Color.parseColor("#080B10"), Color.BLACK))
+            addView(mainLayout)
+        }
+        setContentView(rootScroll)
         
         // CARGAR HISTORIAL 7 DÍAS CAJA
         loadPaymentsFromStorage()
@@ -161,7 +166,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun checkAndShowLicenseDialogOnLaunch() {
         val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
         val key = prefs.getString("LICENSE_KEY", "") ?: ""
-        if (key.isEmpty()) {
+        val name = prefs.getString("USER_NAME", "") ?: ""
+        
+        if (key.isEmpty() || name.isEmpty()) {
             showLicenseActivationDialog(
                 "👑 ACTIVACIÓN IMPORTACIONES WING GOLD", 
                 "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
@@ -236,9 +243,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             withContext(Dispatchers.Main) {
                 when (status) {
-                    "NOT_FOUND" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O NO REGISTRADA", "La clave '$key' no existe en el sistema de licencias de Google Sheets.\nContacte a Soporte WhatsApp (921665833).")
+                    "NOT_FOUND" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O NO REGISTRADA", "La clave '$key' no existe en los servidores de Wing.\nContacte a Soporte WhatsApp (921665833).")
                     "DEVICE_BLOCKED" -> showLicenseActivationDialog("📱 LICENCIA VINCULADA A OTRO CELULAR", "Esta licencia ya se encuentra activa en otro equipo.\nContacte a Soporte WhatsApp (921665833).")
-                    "EXPIRED" -> showLicenseActivationDialog("⏳ LICENCIA VENCIDA ($expStr)", "Su licencia ha vencido en el documento de control.\nContacte a Soporte WhatsApp (921665833).")
+                    "EXPIRED" -> showLicenseActivationDialog("⏳ LICENCIA VENCIDA ($expStr)", "Su licencia ha vencido en los servidores de Wing.\nContacte a Soporte WhatsApp (921665833).")
                     else -> {
                         getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
                             .putString("LICENSE_KEY", key).apply()
@@ -427,10 +434,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun setupHeader() {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
+        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+        val userName = prefs.getString("USER_NAME", "") ?: ""
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v80.0"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "CANAL DE CAJA: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f })
+            addView(TextView(this@MainActivity).apply { text = "👑 IMPORTACIONES WING PAGOS • v999.0 GOLD"; textSize = 16f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { 
+                text = if (userName.isNotEmpty()) "¡BIENVENIDO $userName! | CAJA GOLD WING • CANAL: $currentTopic" else "¡BIENVENIDO! | CAJA GOLD WING • CANAL: $currentTopic"
+                textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.9f 
+            })
         }
         header.addView(titleLayout)
 
@@ -474,21 +486,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbEmisor = RadioButton(this).apply {
-            id = 1001
-            text = "📱 EMISOR (CAJA PRINCIPAL)"
+            id = View.generateViewId()
+            text = "📱 EMISOR"
             setTextColor(Color.WHITE)
             textSize = 10f
-            isChecked = isEmisorMode
             layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
         }
 
         rbCompanero = RadioButton(this).apply {
-            id = 1002
-            text = "📱 RECEPTOR (VENDEDOR)"
+            id = View.generateViewId()
+            text = "📱 RECEPTOR"
             setTextColor(Color.WHITE)
             textSize = 10f
-            isChecked = !isEmisorMode
             layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
+        }
+        
+        // Asignar check después de definir los IDs para evitar disparos múltiples
+        if (isEmisorMode) {
+            rbEmisor.isChecked = true
+        } else {
+            rbCompanero.isChecked = true
         }
 
         modeRadioGroup.addView(rbEmisor)
@@ -551,28 +568,48 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cardGranTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(15, 12, 15, 12)
-            background = getGlassDrawable(Color.parseColor("#2500E5FF"), Color.parseColor("#AA00E5FF"))
+            background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
+                Color.parseColor("#44FFD700"),
+                Color.parseColor("#15000000"),
+                Color.parseColor("#66DAA520")
+            )).apply {
+                cornerRadius = 16f
+                setStroke(3, Color.parseColor("#FFD700"))
+            }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 8, 0, 0) }
         }
         val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
-        val lblGran = TextView(this).apply { text = "💰 RECAUDACIÓN DEL DÍA"; textSize = 10f; setTextColor(Color.WHITE); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
+        val lblGran = TextView(this).apply { text = "👑 RECAUDACIÓN DEL DÍA"; textSize = 11f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
         val btnExport = Button(this).apply {
             text = "📁 DESCARGAS CSV"
             textSize = 9f
-            setTextColor(Color.WHITE)
-            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
+            setTextColor(Color.BLACK)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#FFD700"))
+                cornerRadius = 12f
+            }
+            setTypeface(null, Typeface.BOLD)
             layoutParams = RelativeLayout.LayoutParams(-2, (32 * resources.displayMetrics.density).toInt()).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
             setOnClickListener { exportCierreDeCajaCSV() }
         }
         headerRow.addView(lblGran)
         headerRow.addView(btnExport)
 
-        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 24f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.DEFAULT_BOLD) }
-        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.7f }
+        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 26f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.DEFAULT_BOLD) }
+        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.9f }
         
+        tvUltimoPago = TextView(this).apply {
+            text = "⚡ ÚLTIMO COBRO: Ninguno aún"
+            textSize = 10f
+            setTextColor(Color.parseColor("#FFD700"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setPadding(0, 8, 0, 0)
+        }
+
         cardGranTotal.addView(headerRow)
         cardGranTotal.addView(tvGranTotal)
         cardGranTotal.addView(tvCantPagos)
+        cardGranTotal.addView(tvUltimoPago)
 
         grid.addView(row1)
         grid.addView(row2)
@@ -596,7 +633,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun setupHistoryRecyclerView() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(0, 4, 0, 8) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 4, 0, 8) }
             background = getGlassDrawable(Color.parseColor("#AA000000"), Color.parseColor("#2200E5FF"))
             padding(12, 10, 12, 10)
         }
@@ -622,7 +659,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         rvPayments = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
-            layoutParams = LinearLayout.LayoutParams(-1, -1)
+            layoutParams = LinearLayout.LayoutParams(-1, -2)
+            isNestedScrollingEnabled = false
         }
         adapter = PaymentAdapter(paymentList)
         rvPayments.adapter = adapter
@@ -632,14 +670,77 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun showWeeklyDialog() {
-        val count = paymentList.size
-        var totalSemanual = 0.0
-        for (p in paymentList) totalSemanual += p.amount
-
+        val grouped = paymentList.groupBy { it.date }.toSortedMap(reverseOrder())
+        
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(30, 20, 30, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val title = TextView(this).apply { text = "📅 ÚLTIMOS 7 DÍAS"; textSize = 14f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0, 0, 0, 15) }
+        container.addView(title)
+        
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, (300 * resources.displayMetrics.density).toInt())
+        }
+        val listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        
+        for ((date, payments) in grouped) {
+            val totalDay = payments.sumOf { it.amount }
+            val btnDay = Button(this).apply {
+                text = "$date • ${payments.size} pagos • S/ ${String.format(Locale.US, "%.2f", totalDay)}"
+                textSize = 10f
+                setTextColor(Color.WHITE)
+                background = getGlassDrawable(Color.parseColor("#2200E5FF"), Color.parseColor("#8800E5FF"))
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
+                setOnClickListener { showDayDetailsDialog(date, payments) }
+            }
+            listContainer.addView(btnDay)
+        }
+        
+        scrollView.addView(listContainer)
+        container.addView(scrollView)
+        
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
-            .setTitle("📅 REGISTRO DE ÚLTIMOS 7 DÍAS")
-            .setMessage("Se han registrado $count transacciones acumuladas en la última semana.\n\nMonto Acumulado 7 días: S/ ${String.format(Locale.US, "%.2f", totalSemanual)}")
+            .setView(container)
             .setPositiveButton("CERRAR", null)
+            .show()
+    }
+
+    private fun showDayDetailsDialog(date: String, payments: List<PaymentRecord>) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(30, 20, 30, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val title = TextView(this).apply { text = "📝 PAGOS DEL $date"; textSize = 12f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0, 0, 0, 15) }
+        container.addView(title)
+        
+        val scrollView = ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(-1, (300 * resources.displayMetrics.density).toInt())
+        }
+        val listContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        
+        for (p in payments) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                padding(15, 10, 15, 10)
+                background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#55FFFFFF"))
+                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
+            }
+            val tvName = TextView(this).apply { text = p.name; textSize = 11f; setTextColor(Color.WHITE); setTypeface(null, Typeface.BOLD) }
+            val tvDetails = TextView(this).apply { text = "${p.bank} • S/ ${p.amount} • ${p.time}"; textSize = 9f; setTextColor(Color.parseColor("#00E5FF")) }
+            card.addView(tvName)
+            card.addView(tvDetails)
+            listContainer.addView(card)
+        }
+        
+        scrollView.addView(listContainer)
+        container.addView(scrollView)
+        
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setPositiveButton("VOLVER", null)
             .show()
     }
 
@@ -668,6 +769,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
         tvCantPagos.text = "${todayPayments.size} cobro(s) registrados hoy (${paymentList.size} en 7 días)"
+        
+        if (todayPayments.isNotEmpty()) {
+            val lastPayment = todayPayments.first() // Asumiendo orden descendente
+            tvUltimoPago.text = "⚡ ÚLTIMO: S/ ${lastPayment.amount} de ${lastPayment.name.take(15)}"
+        } else {
+            tvUltimoPago.text = "⚡ ÚLTIMO COBRO: Ninguno aún"
+        }
     }
 
     private fun showCompaneroPopup(bank: String, name: String, amount: String) {
@@ -848,8 +956,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setText(licenseKey)
             setHintTextColor(Color.parseColor("#55FFFFFF"))
             setTextColor(Color.WHITE)
-            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FF007F"))
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FFD700"))
             padding(20, 15, 20, 15)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
+        }
+
+        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+        val savedName = prefs.getString("USER_NAME", "") ?: ""
+        
+        val inputName = EditText(this).apply {
+            hint = "Su Nombre (Ej. Wilson)..."
+            setText(savedName)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#00E5FF"))
+            padding(20, 15, 20, 15)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
         }
 
         val btnWhatsApp = Button(this).apply {
@@ -858,7 +982,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
             background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
-            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 15, 0, 0) }
+            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 5, 0, 0) }
             setOnClickListener {
                 val devId = getHardwareDeviceId()
                 val url = "https://api.whatsapp.com/send?phone=51921665833&text=" + Uri.encode("Hola Importaciones Wing, solicito soporte de licencia para equipo ID: $devId")
@@ -878,18 +1002,28 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         container.addView(lblTitle)
         container.addView(lblMsg)
         container.addView(input)
+        container.addView(inputName)
         container.addView(btnWhatsApp)
         container.addView(devIdText)
 
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
             .setView(container)
             .setCancelable(false)
-            .setPositiveButton("🔑 ACTIVAR LICENCIA") { _, _ ->
+            .setPositiveButton("🔑 GUARDAR Y ACTIVAR") { _, _ ->
                 val key = input.text.toString().trim()
+                val name = inputName.text.toString().trim()
                 if (key.isNotEmpty()) {
                     licenseKey = key
-                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("LICENSE_KEY", key).apply()
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                        .putString("LICENSE_KEY", key)
+                        .putString("USER_NAME", name)
+                        .apply()
                     verifyLicenseWithGoogleSheet(key)
+                } else if (name.isNotEmpty()) {
+                     getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                        .putString("USER_NAME", name)
+                        .apply()
+                     recreate()
                 }
             }
             .setNegativeButton("Cerrar", null)
