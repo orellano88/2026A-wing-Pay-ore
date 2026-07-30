@@ -350,7 +350,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "👑 IMPORTACIONES WING PAGOS • v87.0 GOLD"; textSize = 16f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v80.0"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             addView(TextView(this@MainActivity).apply { text = "CANAL DE CAJA: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f })
         }
         header.addView(titleLayout)
@@ -816,6 +816,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .setNegativeButton("Cerrar", null)
             .show()
     }
+    private fun showVoiceMessageDialog() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(35, 25, 35, 20)
