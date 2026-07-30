@@ -816,6 +816,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .setNegativeButton("Cerrar", null)
             .show()
     }
+    private fun showVoiceMessageDialog() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(35, 25, 35, 20)
