@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     // Modo Dual State
     private var isEmisorMode = true
-    private var currentTopic = "wingpay_client_A2ZQV4"
+    private var currentTopic = "wingpay_ferreteria_" + UUID.randomUUID().toString().substring(0, 6)
     
     // UIs
     private lateinit var mainLayout: LinearLayout
@@ -94,7 +94,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 runOnUiThread {
                     adapter.addPayment(item)
                     updateTotals()
-                    savePaymentsToStorage() // PERSISTENCIA DE DATOS DE COBRO
+                    savePaymentsToStorage()
                     
                     if (!isEmisorMode && isRemote) {
                         showCompaneroPopup(bank, name, amtStr)
@@ -122,7 +122,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
-        currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
+        
+        // Si no existe token guardado previa ni manualmente, se guarda el token único auto-generado
+        if (!prefs.contains("CLIENT_CODE")) {
+            prefs.edit().putString("CLIENT_CODE", currentTopic).apply()
+        } else {
+            currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
+        }
+        
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
 
         // Sensor Shake-to-Silence
@@ -132,10 +139,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         buildUI()
         setContentView(mainLayout)
         
-        // Cargar Historial Guardado (Caja Ferretera)
         loadPaymentsFromStorage()
-        
-        // Auto-Exención de Batería (Doze Mode Killer Ferretero)
         requestBatteryOptimizationExemption()
 
         startStatusMonitor()
@@ -161,9 +165,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager?.unregisterListener(this)
     }
 
-    // --------------------------------------------------------------------------------
-    // MEJORA 1: DOZE MODE KILLER (EXENCIÓN DE BATERÍA AUTOMÁTICA EN CAJA)
-    // --------------------------------------------------------------------------------
     private fun requestBatteryOptimizationExemption() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -178,9 +179,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // --------------------------------------------------------------------------------
-    // MEJORA 4: PERSISTENCIA Y EXPORTACIÓN DEL CIERRE DE CAJA FERRETERO
-    // --------------------------------------------------------------------------------
     private fun savePaymentsToStorage() {
         try {
             val jsonArray = JSONArray()
@@ -269,9 +267,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // --------------------------------------------------------------------------------
-    // SENSOR SHAKE-TO-SILENCE (SECCIÓN 4)
-    // --------------------------------------------------------------------------------
     override fun onSensorChanged(event: SensorEvent?) {
         if (event == null || event.sensor.type != Sensor.TYPE_ACCELEROMETER) return
         val x = event.values[0]
@@ -286,9 +281,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 
-    // --------------------------------------------------------------------------------
-    // UI BUILDER (DARK THEME AMOLED #0F141C - SECCIÓN 6 & 1)
-    // --------------------------------------------------------------------------------
     private fun buildUI() {
         mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -310,7 +302,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(TextView(this@MainActivity).apply { text = "WINGPAY FERRETERO TITAN • v73.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "SISTEMA NATIVO DE CONTROL DE COBROS Y CAJA FERRETERA"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
+            addView(TextView(this@MainActivity).apply { text = "TOKEN ACTUAL: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
         }
         header.addView(titleLayout)
 
@@ -426,7 +418,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         row2.addView(cardBcp.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 4, 0) })
         row2.addView(cardOtros.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 0, 0) })
 
-        // Gran Total Card + Botón Cierre de Caja
         val cardGranTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(15, 12, 15, 12)
@@ -594,6 +585,49 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
             .setView(container)
             .setPositiveButton("CERRAR", null)
+            .setNeutralButton("✏️ EDICIÓN MANUAL") { _, _ -> showCustomTokenDialog() }
+            .show()
+    }
+
+    // --------------------------------------------------------------------------------
+    // DIÁLOGO PARA PERSONALIZACIÓN MANUAL DE TOKEN FERRETERO
+    // --------------------------------------------------------------------------------
+    private fun showCustomTokenDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val label = TextView(this).apply {
+            text = "🔑 PERSONALIZAR TOKEN DE FERRETERÍA"
+            textSize = 12f
+            setTextColor(Color.parseColor("#00E5FF"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setMargins(0, 0, 0, 15)
+        }
+        val input = EditText(this).apply {
+            setText(currentTopic)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#00E5FF"))
+            padding(20, 15, 20, 15)
+        }
+        container.addView(label)
+        container.addView(input)
+
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setPositiveButton("💾 GUARDAR TOKEN") { _, _ ->
+                val newToken = input.text.toString().trim()
+                if (newToken.isNotEmpty()) {
+                    currentTopic = newToken
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", newToken).apply()
+                    Toast.makeText(this, "Token actualizado a: $newToken", Toast.LENGTH_SHORT).show()
+                    relaunchService()
+                    recreate()
+                }
+            }
+            .setNegativeButton("Cancelar", null)
             .show()
     }
 
@@ -622,7 +656,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         row1.addView(createActionButton("🚨\nSOS", 1f) { triggerCommand(DataSyncService.KEY_SOS) })
         row1.addView(createActionButton("👮\nPOLICÍA", 1f) { triggerCommand(DataSyncService.KEY_POLICE) })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
-        row2.addView(createActionButton("⚙️\nAJUSTES", 1f) { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) })
+        row2.addView(createActionButton("⚙️\nAJUSTES", 1f) { showCustomTokenDialog() })
         row2.addView(createActionButton("📷\nQR", 1f) { openQRScanner() })
         row2.addView(createActionButton("🔌\nTEST", 1f) { triggerCommand(DataSyncService.KEY_TEST) })
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
@@ -681,10 +715,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun vincularCodigo(data: String) { 
-        if (data.contains("wingpay")) { 
-            currentTopic = data
-            getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", data).apply()
+        val tokenLimpio = data.trim()
+        if (tokenLimpio.isNotEmpty()) { 
+            currentTopic = tokenLimpio
+            getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("CLIENT_CODE", tokenLimpio).apply()
+            Toast.makeText(this, "VINCULADO A TOKEN: $tokenLimpio", Toast.LENGTH_SHORT).show()
             relaunchService() 
+            recreate()
         }
     }
     private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) {} }
