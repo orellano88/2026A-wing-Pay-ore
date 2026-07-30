@@ -37,6 +37,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -46,7 +48,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var isEmisorMode = true
     private var currentTopic = "wingpay_ferreteria_" + UUID.randomUUID().toString().substring(0, 6)
     private var userName = "Vendedor Ferretero"
-    
+    private var licenseKey = ""
+    private var isLicenseValid = false
+
     // UIs
     private lateinit var mainLayout: LinearLayout
     private lateinit var modeRadioGroup: RadioGroup
@@ -134,6 +138,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         
         userName = prefs.getString("USER_NAME", userName) ?: userName
+        licenseKey = prefs.getString("LICENSE_KEY", "") ?: ""
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -147,14 +152,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         startStatusMonitor()
         handleSOSIntent(intent)
-        startMorningGreetingAlarm()
-        
-        val filter = IntentFilter("STARK_HUD_UPDATE")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(hudReceiver, filter, Context.RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(hudReceiver, filter)
-        }
+
+        // VALIDACIÓN DE LICENCIA CLOUD DESDE GOOGLE SHEETS
+        verifyLicenseWithGoogleSheet()
     }
 
     override fun onResume() {
@@ -167,6 +167,130 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onPause() {
         super.onPause()
         sensorManager?.unregisterListener(this)
+    }
+
+    // --------------------------------------------------------------------------------
+    // VERIFICACIÓN AUTOMÁTICA DE LICENCIA Y VENCIMIENTO CON GOOGLE SHEETS (ONLINE)
+    // --------------------------------------------------------------------------------
+    private fun verifyLicenseWithGoogleSheet() {
+        if (licenseKey.isEmpty()) {
+            showLicenseActivationDialog("BIENVENIDO A WINGPAY FERRETERO", "Por favor ingrese su Clave de Licencia proporcionada por Importaciones Wing para activar el aplicativo.")
+            return
+        }
+
+        mainScope.launch(Dispatchers.IO) {
+            try {
+                val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
+                val conn = URL(csvUrl).openConnection() as HttpURLConnection
+                conn.connectTimeout = 8000
+                conn.readTimeout = 8000
+                
+                val lines = conn.inputStream.bufferedReader().readLines()
+                var keyFound = false
+                var isExpired = false
+                var expirationDateStr = ""
+                var clientName = ""
+
+                for (line in lines) {
+                    val cols = line.split(",").map { it.replace("\"", "").trim() }
+                    if (cols.size >= 3) {
+                        val rowClient = cols[0]
+                        val rowCode = cols[1]
+                        val rowExpiration = cols[2]
+
+                        if (rowCode.equals(licenseKey, ignoreCase = true)) {
+                            keyFound = true
+                            clientName = rowClient
+                            expirationDateStr = rowExpiration
+
+                            if (rowExpiration.isNotEmpty()) {
+                                try {
+                                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                    val expDate = sdf.parse(rowExpiration)
+                                    val today = Date()
+                                    if (expDate != null && today.after(expDate)) {
+                                        isExpired = true
+                                    }
+                                } catch (e: Exception) {}
+                            }
+                            break
+                        }
+                    }
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (!keyFound) {
+                        showLicenseActivationDialog("CLAVE DE LICENCIA INVÁLIDA", "La clave '$licenseKey' no se encuentra registrada en el sistema. Ingrese una clave válida.")
+                    } else if (isExpired) {
+                        showLicenseActivationDialog("LICENCIA VENCIDA", "Su suscripción venció el $expirationDateStr.\n\nPor favor renueve su servicio con Importaciones Wing para continuar utilizando la app.")
+                    } else {
+                        isLicenseValid = true
+                        getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                            .putString("LICENSE_KEY", licenseKey).apply()
+                        
+                        startMorningGreetingAlarm()
+                    }
+                }
+
+            } catch (e: Exception) {
+                // En caso de estar sin internet se permite el uso por tolerancia local
+                withContext(Dispatchers.Main) {
+                    isLicenseValid = true
+                    startMorningGreetingAlarm()
+                }
+            }
+        }
+    }
+
+    private fun showLicenseActivationDialog(title: String, message: String) {
+        isLicenseValid = false
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val lblTitle = TextView(this).apply {
+            text = title
+            textSize = 12f
+            setTextColor(Color.parseColor("#FF007F"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setMargins(0, 0, 0, 10)
+        }
+        val lblMsg = TextView(this).apply {
+            text = message
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            setMargins(0, 0, 0, 15)
+        }
+        val input = EditText(this).apply {
+            hint = "Ingrese su Clave/Código de Licencia..."
+            setText(licenseKey)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FF007F"))
+            padding(20, 15, 20, 15)
+        }
+        container.addView(lblTitle)
+        container.addView(lblMsg)
+        container.addView(input)
+
+        val dialog = AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setCancelable(false)
+            .setPositiveButton("🔑 ACTIVAR LICENCIA", null)
+            .create()
+
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val key = input.text.toString().trim()
+            if (key.isNotEmpty()) {
+                licenseKey = key
+                dialog.dismiss()
+                verifyLicenseWithGoogleSheet()
+            } else {
+                Toast.makeText(this, "Ingrese una clave válida", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // --------------------------------------------------------------------------------
@@ -391,7 +515,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v74.1"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v75.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             
             tvWelcomeUser = TextView(this@MainActivity).apply { 
                 text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
@@ -508,7 +632,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cardYape = createMiniCard("🟣 YAPE CAJA", "#FF007F").also { tvTotalYape = it.second }
         val cardPlin = createMiniCard("🔵 PLIN CAJA", "#00E5FF").also { tvTotalPlin = it.second }
         row1.addView(cardYape.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 4, 0) })
-        row1.addView(cardPlin.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 0, 0) })
+        row1.addView(cardPlin.first, LinearLayout.LayoutParams(4, 0, 0, 0) })
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f; setMargins(0, 6, 0, 0) }
         val cardBcp = createMiniCard("🟠 BCP TELECRÉDITO", "#FFC107").also { tvTotalBcp = it.second }
