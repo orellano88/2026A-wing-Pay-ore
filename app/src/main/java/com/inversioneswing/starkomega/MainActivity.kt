@@ -890,7 +890,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 setColor(Color.parseColor("#0F141C"))
                 cornerRadius = 25f
             }
-            addView(TextView(this@MainActivity).apply { text = "QR VINCULACION VENDEDOR/MOZO"; textSize = 13f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,15) })
+            addView(TextView(this@MainActivity).apply { text = "📱 QR VINCULACIÓN DE VENDEDORES"; textSize = 13f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,15) })
             addView(imgView)
             addView(TextView(this@MainActivity).apply { text = currentTopic; textSize = 11f; setTextColor(Color.WHITE); setMargins(0,15,0,0) })
         }
