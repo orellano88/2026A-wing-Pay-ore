@@ -152,6 +152,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } else {
             registerReceiver(hudReceiver, filter)
         }
+
+        startMorningGreetingAlarm()
+        verifyLicenseWithGoogleSheet()
     }
 
     override fun onResume() {
@@ -380,6 +383,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbEmisor = RadioButton(this).apply {
+            id = View.generateViewId()
             text = "📱 EMISOR (CAJA PRINCIPAL)"
             setTextColor(Color.WHITE)
             textSize = 10f
@@ -388,6 +392,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbCompanero = RadioButton(this).apply {
+            id = View.generateViewId()
             text = "📱 RECEPTOR (VENDEDOR)"
             setTextColor(Color.WHITE)
             textSize = 10f
