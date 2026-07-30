@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var userName = "Vendedor Ferretero"
     private var licenseKey = ""
     private var isLicenseValid = false
+    private val supportPhone = "51921665833"
 
     // UIs
     private lateinit var mainLayout: LinearLayout
@@ -153,7 +154,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         startStatusMonitor()
         handleSOSIntent(intent)
 
-        // VALIDACIÓN DE LICENCIA Y HARDWARE DEVICE ID CON GOOGLE SHEETS
         verifyLicenseWithGoogleSheet()
     }
 
@@ -169,9 +169,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         sensorManager?.unregisterListener(this)
     }
 
-    // --------------------------------------------------------------------------------
-    // OBTENER ID ÚNICO DEL DISPOSITIVO (HARDWARE DEVICE ID - 1 CELULAR POR LICENCIA)
-    // --------------------------------------------------------------------------------
     private fun getHardwareDeviceId(): String {
         return try {
             Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "UNKNOWN_DEVICE"
@@ -181,11 +178,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     // --------------------------------------------------------------------------------
-    // VERIFICACIÓN AUTOMÁTICA DE LICENCIA, FECHA VENCIMIENTO Y VÍNCULO DE HARDWARE
+    // VERIFICACIÓN AUTOMÁTICA DE LICENCIA Y CONTACTO WHATSAPP DIRECTO
     // --------------------------------------------------------------------------------
     private fun verifyLicenseWithGoogleSheet() {
         if (licenseKey.isEmpty()) {
-            showLicenseActivationDialog("BIENVENIDO A WINGPAY FERRETERO", "Por favor ingrese su Clave de Licencia proporcionada por Importaciones Wing para activar el aplicativo.")
+            showLicenseActivationDialog(
+                "ACTIVACIÓN WINGPAY FERRETERO", 
+                "Para obtener su clave de licencia contacte a Importaciones Wing al teléfono o WhatsApp: 921665833."
+            )
             return
         }
 
@@ -211,17 +211,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         val rowClient = cols[0]
                         val rowCode = cols[1]
                         val rowExpiration = cols.getOrNull(2) ?: ""
-                        val rowDeviceId = cols.getOrNull(4) ?: "" // Columna 5: DEVICE_ID
+                        val rowDeviceId = cols.getOrNull(4) ?: ""
 
                         if (rowCode.equals(licenseKey, ignoreCase = true)) {
                             keyFound = true
                             expirationDateStr = rowExpiration
                             registeredDeviceId = rowDeviceId
 
-                            // 1. REGLA DE VENCIMIENTO STRICT: SI VIENE VACÍA SE EXPIRA HOY MISMO (EVITA BUG)
                             if (rowExpiration.isEmpty()) {
                                 isExpired = true
-                                expirationDateStr = "SIN FECHA (REGISTRE FECHA VALIDA O 31/12/2099)"
+                                expirationDateStr = "SIN FECHA REGISTRADA"
                             } else {
                                 try {
                                     val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -235,7 +234,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                                 }
                             }
 
-                            // 2. REGLA DE HARDWARE UNICO: VINCULA LA CLAVE A 1 SOLO CELULAR
                             if (registeredDeviceId.isNotEmpty() && !registeredDeviceId.equals(currentDeviceId, ignoreCase = true)) {
                                 isDeviceBlocked = true
                             }
@@ -247,11 +245,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
                 withContext(Dispatchers.Main) {
                     if (!keyFound) {
-                        showLicenseActivationDialog("CLAVE DE LICENCIA INVÁLIDA", "La clave '$licenseKey' no se encuentra registrada en el sistema. Ingrese una clave válida.")
+                        showLicenseActivationDialog("CLAVE NO REGISTRADA", "La clave '$licenseKey' no se encuentra registrada.\nContacte a Importaciones Wing (921665833) para activar su licencia.")
                     } else if (isDeviceBlocked) {
-                        showLicenseActivationDialog("LICENCIA EN USO EN OTRO DISPOSITIVO", "Esta clave de licencia ya se encuentra vinculada a otro celular.\n\nCada clave es válida para 1 solo equipo. Contacte a Importaciones Wing para solicitar un cambio de equipo.")
+                        showLicenseActivationDialog("LICENCIA EN USO EN OTRO CELULAR", "Esta licencia ya fue vinculada a otro equipo.\nContacte a Importaciones Wing (921665833) para solicitar cambio de equipo.")
                     } else if (isExpired) {
-                        showLicenseActivationDialog("LICENCIA VENCIDA / INACTIVA", "Su suscripción no se encuentra activa ($expirationDateStr).\n\nPor favor renueve su servicio con Importaciones Wing para continuar utilizando la app.")
+                        showLicenseActivationDialog("LICENCIA VENCIDA ($expirationDateStr)", "Su suscripción ha expirado.\nContacte a Importaciones Wing (921665833) para renovar el servicio.")
                     } else {
                         isLicenseValid = true
                         getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
@@ -262,12 +260,23 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 }
 
             } catch (e: Exception) {
-                // En caso de no tener internet, tolera el acceso local si ya estaba activado previamente
                 withContext(Dispatchers.Main) {
                     isLicenseValid = true
                     startMorningGreetingAlarm()
                 }
             }
+        }
+    }
+
+    private fun openWhatsAppSupport(customMsg: String) {
+        try {
+            val devId = getHardwareDeviceId()
+            val text = Uri.encode("$customMsg\nID Dispositivo: $devId\nClave actual: $licenseKey")
+            val url = "https://api.whatsapp.com/send?phone=$supportPhone&text=$text"
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            startActivity(i)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Contactar al 921665833", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -292,7 +301,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             setMargins(0, 0, 0, 15)
         }
         val input = EditText(this).apply {
-            hint = "Ingrese su Clave/Código de Licencia..."
+            hint = "Ingrese su Clave de Licencia..."
             setText(licenseKey)
             setHintTextColor(Color.parseColor("#55FFFFFF"))
             setTextColor(Color.WHITE)
@@ -300,16 +309,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             padding(20, 15, 20, 15)
         }
 
+        val btnWhatsApp = Button(this).apply {
+            text = "💬 CONTACTAR SOPORTE WHATSAPP (921665833)"
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
+            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 15, 0, 0) }
+            setOnClickListener {
+                openWhatsAppSupport("Hola Importaciones Wing, necesito ayuda para activar/renovar mi licencia de WingPay.")
+            }
+        }
+
         val devIdText = TextView(this).apply {
-            text = "ID Dispositivo: ${getHardwareDeviceId()}"
+            text = "Soporte: 921665833 • ID Equipo: ${getHardwareDeviceId()}"
             textSize = 8f
-            setTextColor(Color.parseColor("#55FFFFFF"))
-            setMargins(0, 10, 0, 0)
+            setTextColor(Color.parseColor("#88FFFFFF"))
+            gravity = Gravity.CENTER
+            setMargins(0, 12, 0, 0)
         }
 
         container.addView(lblTitle)
         container.addView(lblMsg)
         container.addView(input)
+        container.addView(btnWhatsApp)
         container.addView(devIdText)
 
         val dialog = AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
@@ -326,7 +349,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 dialog.dismiss()
                 verifyLicenseWithGoogleSheet()
             } else {
-                Toast.makeText(this, "Ingrese una clave válida", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Ingrese una clave válida o contacte al 921665833", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -550,7 +573,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v75.1"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v76.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             
             tvWelcomeUser = TextView(this@MainActivity).apply { 
                 text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
