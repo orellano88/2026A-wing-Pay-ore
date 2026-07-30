@@ -199,78 +199,76 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         val currentDeviceId = getHardwareDeviceId()
 
-        mainScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
-                    val conn = (URL(csvUrl).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 5000
-                        readTimeout = 5000
-                    }
-                    
-                    val lines = conn.inputStream.bufferedReader().readLines()
-                    var keyFound = false
-                    var isExpired = false
-                    var isDeviceBlocked = false
-                    var expirationDateStr = ""
+        mainScope.launch(Dispatchers.IO) {
+            var status = "OFFLINE_OK"
+            var expStr = ""
+            try {
+                val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
+                val conn = (URL(csvUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                }
+                
+                val lines = conn.inputStream.bufferedReader().readLines()
+                var keyFound = false
+                var isExpired = false
+                var isDeviceBlocked = false
 
-                    for (line in lines) {
-                        val cols = line.split(",").map { it.replace("\"", "").trim() }
-                        if (cols.size >= 2) {
-                            val rowCode = cols[1]
-                            val rowExpiration = cols.getOrNull(2) ?: ""
-                            val rowDeviceId = cols.getOrNull(4) ?: ""
+                for (line in lines) {
+                    val cols = line.split(",").map { it.replace("\"", "").trim() }
+                    if (cols.size >= 2) {
+                        val rowCode = cols[1]
+                        val rowExpiration = cols.getOrNull(2) ?: ""
+                        val rowDeviceId = cols.getOrNull(4) ?: ""
 
-                            if (rowCode.equals(licenseKey, ignoreCase = true)) {
-                                keyFound = true
-                                expirationDateStr = rowExpiration
+                        if (rowCode.equals(licenseKey, ignoreCase = true)) {
+                            keyFound = true
+                            expStr = rowExpiration
 
-                                if (rowExpiration.isEmpty()) {
-                                    isExpired = true
-                                    expirationDateStr = "SIN FECHA REGISTRADA"
-                                } else {
-                                    try {
-                                        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                                        val expDate = sdf.parse(rowExpiration)
-                                        val today = Date()
-                                        if (expDate != null && today.after(expDate)) {
-                                            isExpired = true
-                                        }
-                                    } catch (e: Exception) {
+                            if (rowExpiration.isEmpty()) {
+                                isExpired = true
+                                expStr = "SIN FECHA REGISTRADA"
+                            } else {
+                                try {
+                                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                    val expDate = sdf.parse(rowExpiration)
+                                    val today = Date()
+                                    if (expDate != null && today.after(expDate)) {
                                         isExpired = true
                                     }
+                                } catch (e: Exception) {
+                                    isExpired = true
                                 }
-
-                                if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
-                                    isDeviceBlocked = true
-                                }
-
-                                break
                             }
+
+                            if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
+                                isDeviceBlocked = true
+                            }
+
+                            break
                         }
                     }
-
-                    if (!keyFound) "NOT_FOUND"
-                    else if (isDeviceBlocked) "DEVICE_BLOCKED"
-                    else if (isExpired) "EXPIRED:$expirationDateStr"
-                    else "VALID"
-
-                } catch (e: Exception) {
-                    "OFFLINE_OK"
                 }
+
+                if (!keyFound) status = "NOT_FOUND"
+                else if (isDeviceBlocked) status = "DEVICE_BLOCKED"
+                else if (isExpired) status = "EXPIRED"
+                else status = "VALID"
+
+            } catch (e: Exception) {
+                status = "OFFLINE_OK"
             }
 
-            when {
-                result == "NOT_FOUND" -> showLicenseActivationDialog("CLAVE NO REGISTRADA", "La clave '$licenseKey' no se encuentra registrada.\nContacte a Importaciones Wing (921665833).")
-                result == "DEVICE_BLOCKED" -> showLicenseActivationDialog("LICENCIA EN USO EN OTRO CELULAR", "Esta licencia ya fue vinculada a otro equipo.\nContacte a Importaciones Wing (921665833).")
-                result.startsWith("EXPIRED") -> {
-                    val date = result.substringAfter(":")
-                    showLicenseActivationDialog("LICENCIA VENCIDA ($date)", "Su suscripción ha expirado.\nContacte a Importaciones Wing (921665833).")
-                }
-                else -> {
-                    isLicenseValid = true
-                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
-                        .putString("LICENSE_KEY", licenseKey).apply()
+            withContext(Dispatchers.Main) {
+                when (status) {
+                    "NOT_FOUND" -> showLicenseActivationDialog("CLAVE NO REGISTRADA", "La clave '$licenseKey' no se encuentra registrada.\nContacte a Importaciones Wing (921665833).")
+                    "DEVICE_BLOCKED" -> showLicenseActivationDialog("LICENCIA EN USO EN OTRO CELULAR", "Esta licencia ya fue vinculada a otro equipo.\nContacte a Importaciones Wing (921665833).")
+                    "EXPIRED" -> showLicenseActivationDialog("LICENCIA VENCIDA ($expStr)", "Su suscripción ha expirado.\nContacte a Importaciones Wing (921665833).")
+                    else -> {
+                        isLicenseValid = true
+                        getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                            .putString("LICENSE_KEY", licenseKey).apply()
+                    }
                 }
             }
         }
