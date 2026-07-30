@@ -163,9 +163,88 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val key = prefs.getString("LICENSE_KEY", "") ?: ""
         if (key.isEmpty()) {
             showLicenseActivationDialog(
-                "ACTIVACIÓN IMPORTACIONES WING", 
+                "👑 ACTIVACIÓN IMPORTACIONES WING GOLD", 
                 "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
             )
+        } else {
+            verifyLicenseWithGoogleSheet(key)
+        }
+    }
+
+    private fun verifyLicenseWithGoogleSheet(key: String) {
+        val currentDeviceId = getHardwareDeviceId()
+        mainScope.launch(Dispatchers.IO) {
+            var status = "OFFLINE_OK"
+            var expStr = ""
+            try {
+                val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
+                val urlObj = java.net.URL(csvUrl)
+                val conn = (urlObj.openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                }
+                
+                val lines = conn.inputStream.bufferedReader().readLines()
+                var keyFound = false
+                var isExpired = false
+                var isDeviceBlocked = false
+
+                for (line in lines) {
+                    val cols = line.split(",").map { it.replace("\"", "").trim() }
+                    if (cols.size >= 2) {
+                        val rowCode = cols[1]
+                        val rowExpiration = cols.getOrNull(2) ?: ""
+                        val rowDeviceId = cols.getOrNull(4) ?: ""
+
+                        if (rowCode.equals(key, ignoreCase = true)) {
+                            keyFound = true
+                            expStr = rowExpiration
+
+                            if (rowExpiration.isEmpty()) {
+                                isExpired = true
+                                expStr = "SIN FECHA REGISTRADA"
+                            } else {
+                                try {
+                                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                    val expDate = sdf.parse(rowExpiration)
+                                    val today = Date()
+                                    if (expDate != null && today.after(expDate)) {
+                                        isExpired = true
+                                    }
+                                } catch (e: Exception) {
+                                    isExpired = true
+                                }
+                            }
+
+                            if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
+                                isDeviceBlocked = true
+                            }
+
+                            break
+                        }
+                    }
+                }
+
+                if (!keyFound) status = "NOT_FOUND"
+                else if (isDeviceBlocked) status = "DEVICE_BLOCKED"
+                else if (isExpired) status = "EXPIRED"
+                else status = "VALID"
+
+            } catch (e: Exception) {
+                status = "OFFLINE_OK"
+            }
+
+            withContext(Dispatchers.Main) {
+                when (status) {
+                    "NOT_FOUND" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O NO REGISTRADA", "La clave '$key' no existe en el sistema de licencias de Google Sheets.\nContacte a Soporte WhatsApp (921665833).")
+                    "DEVICE_BLOCKED" -> showLicenseActivationDialog("📱 LICENCIA VINCULADA A OTRO CELULAR", "Esta licencia ya se encuentra activa en otro equipo.\nContacte a Soporte WhatsApp (921665833).")
+                    "EXPIRED" -> showLicenseActivationDialog("⏳ LICENCIA VENCIDA ($expStr)", "Su licencia ha vencido en el documento de control.\nContacte a Soporte WhatsApp (921665833).")
+                    else -> {
+                        getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                            .putString("LICENSE_KEY", key).apply()
+                    }
+                }
+            }
         }
     }
 
@@ -810,7 +889,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 if (key.isNotEmpty()) {
                     licenseKey = key
                     getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("LICENSE_KEY", key).apply()
-                    Toast.makeText(this, "Clave guardada: $key", Toast.LENGTH_SHORT).show()
+                    verifyLicenseWithGoogleSheet(key)
                 }
             }
             .setNegativeButton("Cerrar", null)
