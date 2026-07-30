@@ -9,10 +9,10 @@ android {
 
     defaultConfig {
         applicationId "com.inversioneswing.starkomega"
-        minSdk 24
+        minSdk 21
         targetSdk 34
-        versionCode 9000
-        versionName "90.0-GOLD-FORCE"
+        versionCode 9500
+        versionName "95.0-UNIVERSAL-COMPATIBLE"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
