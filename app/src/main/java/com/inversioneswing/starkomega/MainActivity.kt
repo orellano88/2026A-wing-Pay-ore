@@ -37,6 +37,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -45,15 +47,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // Modo Dual State
     private var isEmisorMode = true
     private var currentTopic = "wingpay_ferreteria_" + UUID.randomUUID().toString().substring(0, 6)
-    
+    private var userName = "Vendedor Ferretero"
+    private var licenseKey = ""
+    private var isLicenseValid = false
+    private val supportPhone = "51921665833"
+
     // UIs
     private lateinit var mainLayout: LinearLayout
     private lateinit var modeRadioGroup: RadioGroup
     private lateinit var rbEmisor: RadioButton
     private lateinit var rbCompanero: RadioButton
     private lateinit var btnActionQR: Button
+    private lateinit var tvWelcomeUser: TextView
     
-    // Visual Cards (Sección 6 FERRETERÍA MAX)
+    // Visual Cards
     private lateinit var tvTotalYape: TextView
     private lateinit var tvTotalPlin: TextView
     private lateinit var tvTotalBcp: TextView
@@ -96,7 +103,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 runOnUiThread {
                     adapter.addPayment(item)
                     updateTotals()
-                    savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
+                    savePaymentsToStorage()
                     
                     if (!isEmisorMode && isRemote) {
                         showCompaneroPopup(bank, name, amtStr)
@@ -131,6 +138,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
         }
         
+        userName = prefs.getString("USER_NAME", userName) ?: userName
+        licenseKey = prefs.getString("LICENSE_KEY", "") ?: ""
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
@@ -139,19 +148,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         buildUI()
         setContentView(mainLayout)
         
-        // CARGAR HISTORIAL 7 DÍAS CAJA
         loadPaymentsFromStorage()
         requestBatteryOptimizationExemption()
 
         startStatusMonitor()
         handleSOSIntent(intent)
-        
+
         val filter = IntentFilter("STARK_HUD_UPDATE")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(hudReceiver, filter, Context.RECEIVER_EXPORTED)
         } else {
             registerReceiver(hudReceiver, filter)
         }
+
+        startMorningGreetingAlarm()
+        verifyLicenseWithGoogleSheet()
     }
 
     override fun onResume() {
@@ -164,6 +175,253 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onPause() {
         super.onPause()
         sensorManager?.unregisterListener(this)
+    }
+
+    private fun getHardwareDeviceId(): String {
+        return try {
+            Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "UNKNOWN_DEVICE"
+        } catch (e: Exception) {
+            "UNKNOWN_DEVICE"
+        }
+    }
+
+    // --------------------------------------------------------------------------------
+    // VERIFICACIÓN AUTOMÁTICA DE LICENCIA CON PROTECCIÓN CONTRA CRASHES
+    // --------------------------------------------------------------------------------
+    private fun verifyLicenseWithGoogleSheet() {
+        if (licenseKey.isEmpty()) {
+            showLicenseActivationDialog(
+                "ACTIVACIÓN IMPORTACIONES WING", 
+                "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
+            )
+            return
+        }
+
+        val currentDeviceId = getHardwareDeviceId()
+
+        mainScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
+                    val conn = (URL(csvUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 5000
+                        readTimeout = 5000
+                    }
+                    
+                    val lines = conn.inputStream.bufferedReader().readLines()
+                    var keyFound = false
+                    var isExpired = false
+                    var isDeviceBlocked = false
+                    var expirationDateStr = ""
+
+                    for (line in lines) {
+                        val cols = line.split(",").map { it.replace("\"", "").trim() }
+                        if (cols.size >= 2) {
+                            val rowCode = cols[1]
+                            val rowExpiration = cols.getOrNull(2) ?: ""
+                            val rowDeviceId = cols.getOrNull(4) ?: ""
+
+                            if (rowCode.equals(licenseKey, ignoreCase = true)) {
+                                keyFound = true
+                                expirationDateStr = rowExpiration
+
+                                if (rowExpiration.isEmpty()) {
+                                    isExpired = true
+                                    expirationDateStr = "SIN FECHA REGISTRADA"
+                                } else {
+                                    try {
+                                        val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                        val expDate = sdf.parse(rowExpiration)
+                                        val today = Date()
+                                        if (expDate != null && today.after(expDate)) {
+                                            isExpired = true
+                                        }
+                                    } catch (e: Exception) {
+                                        isExpired = true
+                                    }
+                                }
+
+                                if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
+                                    isDeviceBlocked = true
+                                }
+
+                                break
+                            }
+                        }
+                    }
+
+                    if (!keyFound) "NOT_FOUND"
+                    else if (isDeviceBlocked) "DEVICE_BLOCKED"
+                    else if (isExpired) "EXPIRED:$expirationDateStr"
+                    else "VALID"
+
+                } catch (e: Exception) {
+                    "OFFLINE_OK"
+                }
+            }
+
+            when {
+                result == "NOT_FOUND" -> showLicenseActivationDialog("CLAVE NO REGISTRADA", "La clave '$licenseKey' no se encuentra registrada.\nContacte a Importaciones Wing (921665833).")
+                result == "DEVICE_BLOCKED" -> showLicenseActivationDialog("LICENCIA EN USO EN OTRO CELULAR", "Esta licencia ya fue vinculada a otro equipo.\nContacte a Importaciones Wing (921665833).")
+                result.startsWith("EXPIRED") -> {
+                    val date = result.substringAfter(":")
+                    showLicenseActivationDialog("LICENCIA VENCIDA ($date)", "Su suscripción ha expirado.\nContacte a Importaciones Wing (921665833).")
+                }
+                else -> {
+                    isLicenseValid = true
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                        .putString("LICENSE_KEY", licenseKey).apply()
+                }
+            }
+        }
+    }
+
+    private fun openWhatsAppSupport(customMsg: String) {
+        try {
+            val devId = getHardwareDeviceId()
+            val text = Uri.encode("$customMsg\nID Dispositivo: $devId\nClave actual: $licenseKey")
+            val url = "https://api.whatsapp.com/send?phone=$supportPhone&text=$text"
+            val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            startActivity(i)
+        } catch (e: Exception) {
+            Toast.makeText(this, "Contactar al 921665833", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun showLicenseActivationDialog(title: String, message: String) {
+        isLicenseValid = false
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val lblTitle = TextView(this).apply {
+            text = title
+            textSize = 12f
+            setTextColor(Color.parseColor("#FF007F"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
+            layoutParams = p
+        }
+        val lblMsg = TextView(this).apply {
+            text = message
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
+        }
+        val input = EditText(this).apply {
+            hint = "Ingrese su Clave de Licencia..."
+            setText(licenseKey)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FF007F"))
+            padding(20, 15, 20, 15)
+        }
+
+        val btnWhatsApp = Button(this).apply {
+            text = "💬 CONTACTAR SOPORTE WHATSAPP (921665833)"
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
+            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 15, 0, 0) }
+            setOnClickListener {
+                openWhatsAppSupport("Hola Importaciones Wing, necesito ayuda para activar/renovar mi licencia de WingPay.")
+            }
+        }
+
+        val devIdText = TextView(this).apply {
+            text = "Soporte: 921665833 • ID Equipo: ${getHardwareDeviceId()}"
+            textSize = 8f
+            setTextColor(Color.parseColor("#88FFFFFF"))
+            gravity = Gravity.CENTER
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 12, 0, 0) }
+            layoutParams = p
+        }
+
+        container.addView(lblTitle)
+        container.addView(lblMsg)
+        container.addView(input)
+        container.addView(btnWhatsApp)
+        container.addView(devIdText)
+
+        val dialog = AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setCancelable(false)
+            .setPositiveButton("🔑 ACTIVAR LICENCIA", null)
+            .create()
+
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val key = input.text.toString().trim()
+            if (key.isNotEmpty()) {
+                licenseKey = key
+                dialog.dismiss()
+                verifyLicenseWithGoogleSheet()
+            } else {
+                Toast.makeText(this, "Ingrese una clave válida o contacte al 921665833", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun startMorningGreetingAlarm() {
+        mainScope.launch {
+            delay(1500)
+            val cal = Calendar.getInstance()
+            val hour = cal.get(Calendar.HOUR_OF_DAY)
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            
+            val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+            val lastGreetingDate = prefs.getString("LAST_GREETING_DATE", "")
+
+            if (lastGreetingDate != todayStr && hour in 6..11) {
+                prefs.edit().putString("LAST_GREETING_DATE", todayStr).apply()
+                val greeting = "¡Buenos días $userName! Bienvenido a la Caja Ferretera de IMPORTACIONES WING. Que tengas una excelente jornada de ventas hoy."
+                DataSyncService.inst?.speak(greeting, true)
+            }
+        }
+    }
+
+    private fun showEditUserNameDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val label = TextView(this).apply {
+            text = "👤 INGRESE SU NOMBRE DE VENDEDOR"
+            textSize = 11f
+            setTextColor(Color.parseColor("#00E5FF"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
+        }
+        val input = EditText(this).apply {
+            setText(userName)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#00E5FF"))
+            padding(20, 15, 20, 15)
+        }
+        container.addView(label)
+        container.addView(input)
+
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setPositiveButton("💾 GUARDAR NOMBRE") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty()) {
+                    userName = newName
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("USER_NAME", newName).apply()
+                    tvWelcomeUser.text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
+                    Toast.makeText(this, "Nombre actualizado: $userName", Toast.LENGTH_SHORT).show()
+                    val greeting = "Bienvenido a la Caja Ferretera de IMPORTACIONES WING, $userName. Que tengas una excelente jornada de ventas hoy."
+                    DataSyncService.inst?.speak(greeting, true)
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun requestBatteryOptimizationExemption() {
@@ -180,9 +438,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // --------------------------------------------------------------------------------
-    // PERSISTENCIA DE HASTA 7 DÍAS CON LIMPIEZA AUTOMÁTICA DE REGISTROS ANTIGUOS
-    // --------------------------------------------------------------------------------
     private fun savePaymentsToStorage() {
         try {
             val jsonArray = JSONArray()
@@ -194,7 +449,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             for (p in paymentList) {
                 val pDate = try { sdf.parse(p.date) } catch (e: Exception) { Date() }
-                // Guardar solo si es de los últimos 7 días
                 if (pDate != null && !pDate.before(cutoffDate)) {
                     val obj = JSONObject().apply {
                         put("bank", p.bank)
@@ -237,15 +491,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         } catch (e: Exception) {}
     }
 
-    // --------------------------------------------------------------------------------
-    // EXPORTACIÓN AUTOMÁTICA A LA CARPETA DE DESCARGAS (DOWNLOADS) DE ANDROID
-    // --------------------------------------------------------------------------------
     private fun exportCierreDeCajaCSV() {
         try {
             val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date())
             val fileName = "Cierre_Caja_Ferreteria_$dateStr.csv"
             
-            // Guardar en la carpeta publica de Downloads de Android
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             if (!downloadsDir.exists()) downloadsDir.mkdirs()
             
@@ -273,7 +523,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
 
             val granTotal = totalYape + totalPlin + totalBcp + totalOtros
-            sb.append("\nRESUMEN DE CIERRE FERRETERO DEL DIA ($todayStr)\n")
+            sb.append("\nRESUMEN DE CIERRE CAJA FERRETERA - IMPORTACIONES WING ($todayStr)\n")
+            sb.append("VENDEDOR EN CAJA,$userName\n")
             sb.append("TOTAL YAPE,S/ $totalYape\n")
             sb.append("TOTAL PLIN,S/ $totalPlin\n")
             sb.append("TOTAL BCP,S/ $totalBcp\n")
@@ -285,11 +536,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             Toast.makeText(this, "📁 Guardado en Descargas:\n$fileName", Toast.LENGTH_LONG).show()
 
-            // Abrir menú para compartir por WhatsApp / Telegram
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/csv"
-                putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr")
-                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera acumulado en Descargas ($dateStr).\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
+                putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera IMPORTACIONES WING $dateStr - $userName")
+                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera IMPORTACIONES WING ($dateStr) por $userName.\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
                 val fileUri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
                 putExtra(Intent.EXTRA_STREAM, fileUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -335,8 +585,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "WINGPAY FERRETERO TITAN • v73.2"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "CANAL: $currentTopic • 7 DÍAS REGISTRADOS"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v78.0"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            
+            tvWelcomeUser = TextView(this@MainActivity).apply { 
+                text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
+                textSize = 9f
+                setTextColor(Color.WHITE)
+                alpha = 0.9f
+                setOnClickListener { showEditUserNameDialog() }
+            }
+            addView(tvWelcomeUser)
         }
         header.addView(titleLayout)
 
@@ -367,7 +625,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val tvTitle = TextView(this).apply {
-            text = "MODALIDAD FERRETERA EN APK"
+            text = "MODALIDAD DE TRABAJO EN ESTE DISPOSITIVO"
             textSize = 9f
             TextColorHex("#00E5FF")
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -388,7 +646,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbCompanero = RadioButton(this).apply {
-            text = "📱 COMPAÑERO (MOZOS/VENDEDOR)"
+            text = "📱 RECEPTOR (VENDEDOR)"
             setTextColor(Color.WHITE)
             textSize = 10f
             isChecked = !isEmisorMode
@@ -424,11 +682,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun updateModeUI() {
         if (isEmisorMode) {
-            btnActionQR.text = "📱 VER MI QR EMISOR CAJA"
+            btnActionQR.text = "📱 MOSTRAR MI QR A VENDEDORES (MODO EMISOR)"
             btnActionQR.background = getGlassDrawable(Color.parseColor("#2200FF7F"), Color.parseColor("#8800FF7F"))
             btnActionQR.setOnClickListener { showEmisorQRDialog() }
         } else {
-            btnActionQR.text = "📷 ESCANEAR QR CAJA EMISOR"
+            btnActionQR.text = "📷 VENDEDOR: ESCANEAR QR DE LA CAJA EMISORA"
             btnActionQR.background = getGlassDrawable(Color.parseColor("#2200E5FF"), Color.parseColor("#8800E5FF"))
             btnActionQR.setOnClickListener { openQRScanner() }
         }
@@ -444,13 +702,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cardYape = createMiniCard("🟣 YAPE CAJA", "#FF007F").also { tvTotalYape = it.second }
         val cardPlin = createMiniCard("🔵 PLIN CAJA", "#00E5FF").also { tvTotalPlin = it.second }
         row1.addView(cardYape.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 4, 0) })
-        row1.addView(cardPlin.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 0, 0) })
+        row1.addView(cardPlin.first, LinearLayout.LayoutParams(4, 0, 0, 0) })
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f; setMargins(0, 6, 0, 0) }
         val cardBcp = createMiniCard("🟠 BCP TELECRÉDITO", "#FFC107").also { tvTotalBcp = it.second }
         val cardOtros = createMiniCard("🟢 OTROS / BANCOS", "#2ECC71").also { tvTotalOtros = it.second }
         row2.addView(cardBcp.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 4, 0) })
-        row2.addView(cardOtros.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 0, 0) })
+        row2.addView(cardOtros.first, LinearLayout.LayoutParams(4, 0, 0, 0) })
 
         val cardGranTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -542,7 +800,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
             .setTitle("📅 REGISTRO DE ÚLTIMOS 7 DÍAS")
-            .setMessage("Se han registrado $count transacciones acumuladas en la última semana.\n\nMonto Acumulado 7 días: S/ ${String.format(Locale.US, "%.2f", totalSemanual)}")
+            .setMessage("Vendedor: $userName\n\nSe han registrado $count transacciones acumuladas en la última semana.\n\nMonto Acumulado 7 días: S/ ${String.format(Locale.US, "%.2f", totalSemanual)}")
             .setPositiveButton("CERRAR", null)
             .show()
     }
@@ -587,7 +845,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val title = TextView(this).apply {
-            text = "⚡ COBRO FERRETERO CONFIRMADO"
+            text = "⚡ COBRO CONFIRMADO - IMPORTACIONES WING"
             textSize = 13f
             setTextColor(Color.parseColor("#00E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -636,9 +894,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 setColor(Color.parseColor("#0F141C"))
                 cornerRadius = 25f
             }
-            addView(TextView(this@MainActivity).apply { text = "QR VINCULACION VENDEDOR/MOZO"; textSize = 13f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,15) })
+            addView(TextView(this@MainActivity).apply { text = "QR CAJA EMISORA"; textSize = 13f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,5) })
+            addView(TextView(this@MainActivity).apply { text = "Los vendedores deben escanear este QR desde sus celulares receptores"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f; gravity = Gravity.CENTER; setMargins(0,0,0,15) })
             addView(imgView)
-            addView(TextView(this@MainActivity).apply { text = currentTopic; textSize = 11f; setTextColor(Color.WHITE); setMargins(0,15,0,0) })
+            addView(TextView(this@MainActivity).apply { text = "TOKEN CAJA: $currentTopic"; textSize = 11f; setTextColor(Color.WHITE); setMargins(0,15,0,0) })
         }
 
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
@@ -655,7 +914,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
         }
         val label = TextView(this).apply {
-            text = "🔑 PERSONALIZAR TOKEN DE FERRETERÍA"
+            text = "🔑 PERSONALIZAR TOKEN DE CANAL DE CAJA"
             textSize = 12f
             setTextColor(Color.parseColor("#00E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -712,7 +971,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         row1.addView(createActionButton("🚨\nSOS", 1f) { triggerCommand(DataSyncService.KEY_SOS) })
         row1.addView(createActionButton("👮\nPOLICÍA", 1f) { triggerCommand(DataSyncService.KEY_POLICE) })
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 3f }
-        row2.addView(createActionButton("⚙️\nAJUSTES", 1f) { showCustomTokenDialog() })
+        row2.addView(createActionButton("👤\nNOMBRE", 1f) { showEditUserNameDialog() })
         row2.addView(createActionButton("📷\nQR", 1f) { openQRScanner() })
         row2.addView(createActionButton("🔌\nTEST", 1f) { triggerCommand(DataSyncService.KEY_TEST) })
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
@@ -810,7 +1069,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 }
 
 // --------------------------------------------------------------------------------
-// ADAPTER HISTORIAL (RECYCLERVIEW) CON SOPORTE PARA FECHAS Y 7 DÍAS
+// ADAPTER HISTORIAL (RECYCLERVIEW) CON FECHAS
 // --------------------------------------------------------------------------------
 data class PaymentItem(val bank: String, val name: String, val amount: Double, val time: String, val date: String = "")
 
