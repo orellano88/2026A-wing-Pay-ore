@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // Modo Dual State
     private var isEmisorMode = true
     private var currentTopic = "wingpay_ferreteria_" + UUID.randomUUID().toString().substring(0, 6)
+    private var licenseKey = ""
     
     // UIs
     private lateinit var mainLayout: LinearLayout
@@ -132,6 +133,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
+        licenseKey = prefs.getString("LICENSE_KEY", "") ?: ""
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
@@ -153,8 +155,18 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             registerReceiver(hudReceiver, filter)
         }
 
-        startMorningGreetingAlarm()
-        verifyLicenseWithGoogleSheet()
+        checkAndShowLicenseDialogOnLaunch()
+    }
+
+    private fun checkAndShowLicenseDialogOnLaunch() {
+        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+        val key = prefs.getString("LICENSE_KEY", "") ?: ""
+        if (key.isEmpty()) {
+            showLicenseActivationDialog(
+                "ACTIVACIÓN IMPORTACIONES WING", 
+                "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
+            )
+        }
     }
 
     override fun onResume() {
@@ -338,7 +350,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v78.2"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v80.0"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             addView(TextView(this@MainActivity).apply { text = "CANAL DE CAJA: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f })
         }
         header.addView(titleLayout)
@@ -723,7 +735,87 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         btnLayout.addView(row1); btnLayout.addView(row2); mainLayout.addView(btnLayout)
     }
 
-    private fun showVoiceMessageDialog() {
+    private fun getHardwareDeviceId(): String {
+        return try {
+            Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "UNKNOWN_DEVICE"
+        } catch (e: Exception) {
+            "UNKNOWN_DEVICE"
+        }
+    }
+
+    private fun showLicenseActivationDialog(title: String, message: String) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+        }
+        val lblTitle = TextView(this).apply {
+            text = title
+            textSize = 12f
+            setTextColor(Color.parseColor("#FF007F"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
+            layoutParams = p
+        }
+        val lblMsg = TextView(this).apply {
+            text = message
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
+        }
+        val input = EditText(this).apply {
+            hint = "Ingrese su Clave de Licencia..."
+            setText(licenseKey)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FF007F"))
+            padding(20, 15, 20, 15)
+        }
+
+        val btnWhatsApp = Button(this).apply {
+            text = "💬 CONTACTAR SOPORTE WHATSAPP (921665833)"
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
+            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 15, 0, 0) }
+            setOnClickListener {
+                val devId = getHardwareDeviceId()
+                val url = "https://api.whatsapp.com/send?phone=51921665833&text=" + Uri.encode("Hola Importaciones Wing, solicito soporte de licencia para equipo ID: $devId")
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (e: Exception) {}
+            }
+        }
+
+        val devIdText = TextView(this).apply {
+            text = "Soporte: 921665833 • ID Equipo: ${getHardwareDeviceId()}"
+            textSize = 8f
+            setTextColor(Color.parseColor("#88FFFFFF"))
+            gravity = Gravity.CENTER
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 12, 0, 0) }
+            layoutParams = p
+        }
+
+        container.addView(lblTitle)
+        container.addView(lblMsg)
+        container.addView(input)
+        container.addView(btnWhatsApp)
+        container.addView(devIdText)
+
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setCancelable(false)
+            .setPositiveButton("🔑 ACTIVAR LICENCIA") { _, _ ->
+                val key = input.text.toString().trim()
+                if (key.isNotEmpty()) {
+                    licenseKey = key
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("LICENSE_KEY", key).apply()
+                    Toast.makeText(this, "Clave guardada: $key", Toast.LENGTH_SHORT).show()
+                }
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
+    }
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(35, 25, 35, 20)
