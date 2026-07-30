@@ -383,7 +383,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbEmisor = RadioButton(this).apply {
-            id = View.generateViewId()
+            id = 1001
             text = "📱 EMISOR (CAJA PRINCIPAL)"
             setTextColor(Color.WHITE)
             textSize = 10f
@@ -392,7 +392,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbCompanero = RadioButton(this).apply {
-            id = View.generateViewId()
+            id = 1002
             text = "📱 RECEPTOR (VENDEDOR)"
             setTextColor(Color.WHITE)
             textSize = 10f
