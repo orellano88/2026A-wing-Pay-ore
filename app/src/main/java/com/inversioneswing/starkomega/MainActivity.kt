@@ -764,12 +764,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(35, 25, 35, 20)
-            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
+            background = GradientDrawable().apply { 
+                setColor(Color.parseColor("#0F141C"))
+                cornerRadius = 24f 
+                setStroke(3, Color.parseColor("#FFD700"))
+            }
         }
         val lblTitle = TextView(this).apply {
             text = title
             textSize = 12f
-            setTextColor(Color.parseColor("#FF007F"))
+            setTextColor(Color.parseColor("#FFD700"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
             val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
             layoutParams = p
@@ -784,9 +788,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val input = EditText(this).apply {
             hint = "Ingrese su Clave de Licencia..."
             setText(licenseKey)
-            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setHintTextColor(Color.parseColor("#77FFD700"))
             setTextColor(Color.WHITE)
-            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FF007F"))
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FFD700"))
             padding(20, 15, 20, 15)
         }
 
