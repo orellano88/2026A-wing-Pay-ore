@@ -147,7 +147,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         startStatusMonitor()
         handleSOSIntent(intent)
-        startMorningGreetingAlarm() // GREETING SALUDO EN VOZ (7 AM O AL INICIAR)
+        startMorningGreetingAlarm()
         
         val filter = IntentFilter("STARK_HUD_UPDATE")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -170,7 +170,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     // --------------------------------------------------------------------------------
-    // SISTEMA DE SALUDO DE BIENVENIDA EN VOZ A LAS 7:00 AM O AL INICIAR LA APK
+    // SISTEMA DE SALUDO DE BIENVENIDA CON NOMBRE DE MARCA Y EMPRESA EXACTO
     // --------------------------------------------------------------------------------
     private fun startMorningGreetingAlarm() {
         mainScope.launch {
@@ -182,10 +182,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
             val lastGreetingDate = prefs.getString("LAST_GREETING_DATE", "")
 
-            // Si es la mañana (entre 6:00 y 11:00 AM) o primer inicio del día, canta el saludo
             if (lastGreetingDate != todayStr && hour in 6..11) {
                 prefs.edit().putString("LAST_GREETING_DATE", todayStr).apply()
-                val greeting = "¡Buenos días, $userName! Bienvenido a la Caja Ferretera WingPay. Que tengas una excelente jornada de ventas hoy."
+                val greeting = "¡Buenos días $userName! Bienvenido a la Caja Ferretera de IMPORTACIONES WING. Que tengas una excelente jornada de ventas hoy."
                 DataSyncService.inst?.speak(greeting, true)
             }
         }
@@ -198,7 +197,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
         }
         val label = TextView(this).apply {
-            text = "👤 INGRESE SU NOMBRE O CARGO DE VENDEDOR"
+            text = "👤 INGRESE SU NOMBRE DE VENDEDOR"
             textSize = 11f
             setTextColor(Color.parseColor("#00E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -221,9 +220,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 if (newName.isNotEmpty()) {
                     userName = newName
                     getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("USER_NAME", newName).apply()
-                    tvWelcomeUser.text = "¡BIENVENIDO, ${userName.uppercase()}! | FERRETERÍA MAX"
+                    tvWelcomeUser.text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
                     Toast.makeText(this, "Nombre actualizado: $userName", Toast.LENGTH_SHORT).show()
-                    val greeting = "Nombre registrado correctamente. ¡Bienvenido $userName!"
+                    val greeting = "Bienvenido a la Caja Ferretera de IMPORTACIONES WING, $userName. Que tengas una excelente jornada de ventas hoy."
                     DataSyncService.inst?.speak(greeting, true)
                 }
             }
@@ -330,7 +329,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             }
 
             val granTotal = totalYape + totalPlin + totalBcp + totalOtros
-            sb.append("\nRESUMEN DE CIERRE FERRETERO DEL DIA ($todayStr)\n")
+            sb.append("\nRESUMEN DE CIERRE CAJA FERRETERA - IMPORTACIONES WING ($todayStr)\n")
             sb.append("VENDEDOR EN CAJA,$userName\n")
             sb.append("TOTAL YAPE,S/ $totalYape\n")
             sb.append("TOTAL PLIN,S/ $totalPlin\n")
@@ -345,8 +344,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/csv"
-                putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr - $userName")
-                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera ($dateStr) por $userName.\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
+                putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera IMPORTACIONES WING $dateStr - $userName")
+                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera IMPORTACIONES WING ($dateStr) por $userName.\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
                 val fileUri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
                 putExtra(Intent.EXTRA_STREAM, fileUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -392,10 +391,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "WINGPAY FERRETERO TITAN • v74.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING • v74.1"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             
             tvWelcomeUser = TextView(this@MainActivity).apply { 
-                text = "¡BIENVENIDO, ${userName.uppercase()}! | FERRETERÍA MAX"
+                text = "¡BIENVENIDO, ${userName.uppercase()}! | IMPORTACIONES WING"
                 textSize = 9f
                 setTextColor(Color.WHITE)
                 alpha = 0.8f
@@ -432,7 +431,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val tvTitle = TextView(this).apply {
-            text = "MODALIDAD FERRETERA EN APK"
+            text = "MODALIDAD DE TRABAJO - IMPORTACIONES WING"
             textSize = 9f
             TextColorHex("#00E5FF")
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -652,7 +651,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val title = TextView(this).apply {
-            text = "⚡ COBRO FERRETERO CONFIRMADO"
+            text = "⚡ COBRO CONFIRMADO - WING"
             textSize = 13f
             setTextColor(Color.parseColor("#00E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
