@@ -11,8 +11,8 @@ android {
         applicationId "com.inversioneswing.starkomega"
         minSdk 21
         targetSdk 34
-        versionCode 9500
-        versionName "95.0-UNIVERSAL-COMPATIBLE"
+        versionCode 99999
+        versionName "99.0-GOLD-FINAL"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
