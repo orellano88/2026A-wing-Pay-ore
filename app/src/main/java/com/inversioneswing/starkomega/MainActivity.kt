@@ -54,18 +54,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var rbCompanero: RadioButton
     private lateinit var btnActionQR: Button
     
-    // Visual Cards (Sección 6 FERRETERÍA MAX)
+    // Visual Cards
     private lateinit var tvTotalYape: TextView
     private lateinit var tvTotalPlin: TextView
     private lateinit var tvTotalBcp: TextView
     private lateinit var tvTotalOtros: TextView
     private lateinit var tvGranTotal: TextView
     private lateinit var tvCantPagos: TextView
+    private lateinit var tvUltimoPago: TextView
+    private lateinit var tvWelcomeHeader: TextView
     
     // RecyclerView Historial
     private lateinit var rvPayments: RecyclerView
     private lateinit var adapter: PaymentAdapter
     private val paymentList = mutableListOf<PaymentItem>()
+    private val filteredList = mutableListOf<PaymentItem>()
     
     // Popup Receptor (Modo Compañero)
     private var popupWindow: PopupWindow? = null
@@ -86,7 +89,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val name = it.getStringExtra("NAME") ?: "Anónimo"
                 val amtStr = it.getStringExtra("AMT") ?: "0.00"
                 val bank = it.getStringExtra("BANK") ?: "PAGO"
-                val rawMsg = it.getStringExtra("MSG") ?: ""
                 val isRemote = it.getBooleanExtra("IS_REMOTE", false)
                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                 val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -95,9 +97,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val item = PaymentItem(bank, name, amtVal, timeStr, dateStr)
                 
                 runOnUiThread {
-                    adapter.addPayment(item)
+                    paymentList.add(0, item)
+                    filterHistoryByDate(selectedFilterDate)
                     updateTotals()
-                    savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
+                    savePaymentsToStorage()
                     
                     if (!isEmisorMode && isRemote) {
                         showCompaneroPopup(bank, name, amtStr)
@@ -110,6 +113,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private val barcodeLauncher: ActivityResultLauncher<ScanOptions> = registerForActivityResult(ScanContract()) { result ->
         result.contents?.let { vincularCodigo(it) }
     }
+
+    private var userName = "VENDEDOR"
+    private var selectedFilterDate: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,14 +140,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
         licenseKey = prefs.getString("LICENSE_KEY", "") ?: ""
+        userName = prefs.getString("USER_NAME", "VENDEDOR") ?: "VENDEDOR"
 
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
+        selectedFilterDate = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+
         buildUI()
         setContentView(mainLayout)
         
-        // CARGAR HISTORIAL 7 DÍAS CAJA
         loadPaymentsFromStorage()
         requestBatteryOptimizationExemption()
 
@@ -155,44 +163,177 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             registerReceiver(hudReceiver, filter)
         }
 
-        checkAndShowLicenseDialogOnLaunch()
+        verifyLicenseWithGoogleSheet()
     }
 
-    private fun checkAndShowLicenseDialogOnLaunch() {
-        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
-        val key = prefs.getString("LICENSE_KEY", "") ?: ""
-        if (key.isEmpty()) {
+    private fun getHardwareDeviceId(): String {
+        return try {
+            Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "UNKNOWN_DEVICE"
+        } catch (e: Exception) {
+            "UNKNOWN_DEVICE"
+        }
+    }
+
+    private fun verifyLicenseWithGoogleSheet() {
+        if (licenseKey.isEmpty()) {
             showLicenseActivationDialog(
-                "ACTIVACIÓN IMPORTACIONES WING", 
+                "👑 IMPORTACIONES WING GOLD", 
                 "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
             )
+            return
         }
-    }
 
-    override fun onResume() {
-        super.onResume()
-        accelerometer?.let {
-            sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
-        }
-    }
+        val currentDeviceId = getHardwareDeviceId()
 
-    override fun onPause() {
-        super.onPause()
-        sensorManager?.unregisterListener(this)
-    }
+        mainScope.launch(Dispatchers.IO) {
+            var status = "OFFLINE_OK"
+            var expStr = ""
+            try {
+                val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
+                val conn = (URL(csvUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                }
+                
+                val lines = conn.inputStream.bufferedReader().readLines()
+                var keyFound = false
+                var isExpired = false
+                var isDeviceBlocked = false
 
-    private fun requestBatteryOptimizationExemption() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                try {
-                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                        data = Uri.parse("package:$packageName")
+                for (line in lines) {
+                    val cols = line.split(",").map { it.replace("\"", "").trim() }
+                    if (cols.size >= 2) {
+                        val rowCode = cols[1]
+                        val rowExpiration = cols.getOrNull(2) ?: ""
+                        val rowDeviceId = cols.getOrNull(4) ?: ""
+
+                        if (rowCode.equals(licenseKey, ignoreCase = true)) {
+                            keyFound = true
+                            expStr = rowExpiration
+
+                            if (rowExpiration.isEmpty()) {
+                                isExpired = true
+                                expStr = "SIN FECHA REGISTRADA"
+                            } else {
+                                try {
+                                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                                    val expDate = sdf.parse(rowExpiration)
+                                    val today = Date()
+                                    if (expDate != null && today.after(expDate)) {
+                                        isExpired = true
+                                    }
+                                } catch (e: Exception) {
+                                    isExpired = true
+                                }
+                            }
+
+                            if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
+                                isDeviceBlocked = true
+                            }
+
+                            break
+                        }
                     }
-                    startActivity(intent)
-                } catch (e: Exception) {}
+                }
+
+                if (!keyFound) status = "NOT_FOUND"
+                else if (isDeviceBlocked) status = "DEVICE_BLOCKED"
+                else if (isExpired) status = "EXPIRED"
+                else status = "VALID"
+
+            } catch (e: Exception) {
+                status = "OFFLINE_OK"
+            }
+
+            withContext(Dispatchers.Main) {
+                when (status) {
+                    "NOT_FOUND" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O NO REGISTRADA", "La clave '$licenseKey' no existe en el sistema de licencias.\nContacte a Soporte WhatsApp (921665833).")
+                    "DEVICE_BLOCKED" -> showLicenseActivationDialog("📱 LICENCIA VINCULADA A OTRO CELULAR", "Esta licencia ya se encuentra activa en otro equipo.\nContacte a Soporte WhatsApp (921665833).")
+                    "EXPIRED" -> showLicenseActivationDialog("⏳ LICENCIA EXPIRED ($expStr)", "Su licencia ha vencido.\nContacte a Soporte WhatsApp (921665833).")
+                    else -> {
+                        getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                            .putString("LICENSE_KEY", licenseKey).apply()
+                    }
+                }
             }
         }
+    }
+
+    private fun showLicenseActivationDialog(title: String, message: String) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { 
+                setColor(Color.parseColor("#0F141C"))
+                cornerRadius = 24f 
+                setStroke(3, Color.parseColor("#FFD700"))
+            }
+        }
+        val lblTitle = TextView(this).apply {
+            text = title
+            textSize = 12f
+            setTextColor(Color.parseColor("#FFD700"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
+            layoutParams = p
+        }
+        val lblMsg = TextView(this).apply {
+            text = message
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
+        }
+        val input = EditText(this).apply {
+            hint = "Ingrese su Clave de Licencia..."
+            setText(licenseKey)
+            setHintTextColor(Color.parseColor("#77FFD700"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FFD700"))
+            padding(20, 15, 20, 15)
+        }
+
+        val btnWhatsApp = Button(this).apply {
+            text = "💬 CONTACTAR SOPORTE WHATSAPP (921665833)"
+            textSize = 10f
+            setTextColor(Color.BLACK)
+            setTypeface(null, Typeface.BOLD)
+            background = getGlassDrawable(Color.parseColor("#FFD700"), Color.parseColor("#FFA500"))
+            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 15, 0, 0) }
+            setOnClickListener {
+                val devId = getHardwareDeviceId()
+                val url = "https://api.whatsapp.com/send?phone=51921665833&text=" + Uri.encode("Hola Importaciones Wing, solicito activación/soporte de licencia para equipo ID: $devId")
+                try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (e: Exception) {}
+            }
+        }
+
+        val devIdText = TextView(this).apply {
+            text = "Soporte: 921665833 • ID Equipo: ${getHardwareDeviceId()}"
+            textSize = 8f
+            setTextColor(Color.parseColor("#CCFFD700"))
+            gravity = Gravity.CENTER
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 12, 0, 0) }
+            layoutParams = p
+        }
+
+        container.addView(lblTitle)
+        container.addView(lblMsg)
+        container.addView(input)
+        container.addView(btnWhatsApp)
+        container.addView(devIdText)
+
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setCancelable(false)
+            .setPositiveButton("🔑 ACTIVAR LICENCIA") { _, _ ->
+                val key = input.text.toString().trim()
+                if (key.isNotEmpty()) {
+                    licenseKey = key
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("LICENSE_KEY", key).apply()
+                    verifyLicenseWithGoogleSheet()
+                }
+            }
+            .show()
     }
 
     // --------------------------------------------------------------------------------
@@ -209,7 +350,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             for (p in paymentList) {
                 val pDate = try { sdf.parse(p.date) } catch (e: Exception) { Date() }
-                // Guardar solo si es de los últimos 7 días
                 if (pDate != null && !pDate.before(cutoffDate)) {
                     val obj = JSONObject().apply {
                         put("bank", p.bank)
@@ -247,7 +387,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     itemDate
                 ))
             }
-            adapter.notifyDataSetChanged()
+            filterHistoryByDate(selectedFilterDate)
             updateTotals()
         } catch (e: Exception) {}
     }
@@ -260,7 +400,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date())
             val fileName = "Cierre_Caja_Ferreteria_$dateStr.csv"
             
-            // Guardar en la carpeta publica de Downloads de Android
             val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             if (!downloadsDir.exists()) downloadsDir.mkdirs()
             
@@ -300,7 +439,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             Toast.makeText(this, "📁 Guardado en Descargas:\n$fileName", Toast.LENGTH_LONG).show()
 
-            // Abrir menú para compartir por WhatsApp / Telegram
             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                 type = "text/csv"
                 putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr")
@@ -335,7 +473,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             orientation = LinearLayout.VERTICAL
             setPadding(25, 20, 25, 20)
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, 
-                intArrayOf(Color.parseColor("#0F141C"), Color.parseColor("#080B10"), Color.BLACK))
+                intArrayOf(Color.parseColor("#0F141C"), Color.parseColor("#05070A"), Color.BLACK))
         }
 
         setupHeader()
@@ -350,8 +488,21 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "IMPORTACIONES WING PAGOS • v80.0"; textSize = 16f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "CANAL DE CAJA: $currentTopic"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f })
+            addView(TextView(this@MainActivity).apply { 
+                text = "👑 IMPORTACIONES WING PAGOS • v81.0"
+                textSize = 16f
+                setTextColor(Color.parseColor("#FFD700"))
+                setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) 
+            })
+            
+            tvWelcomeHeader = TextView(this@MainActivity).apply { 
+                text = "¡BIENVENIDO, ${userName.uppercase()}! | CAJA GOLD"
+                textSize = 10f
+                setTextColor(Color.parseColor("#FFF8DC"))
+                setTypeface(Typeface.DEFAULT_BOLD)
+                setOnClickListener { showEditUserNameDialog() }
+            }
+            addView(tvWelcomeHeader)
         }
         header.addView(titleLayout)
 
@@ -373,18 +524,56 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         mainLayout.addView(header)
     }
 
+    private fun showEditUserNameDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            padding(35, 25, 35, 20)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f; setStroke(2, Color.parseColor("#FFD700")) }
+        }
+        val label = TextView(this).apply {
+            text = "👤 INGRESAR NOMBRE DE VENDEDOR"
+            textSize = 11f
+            setTextColor(Color.parseColor("#FFD700"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = p
+        }
+        val input = EditText(this).apply {
+            setText(userName)
+            setHintTextColor(Color.parseColor("#55FFFFFF"))
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FFD700"))
+            padding(20, 15, 20, 15)
+        }
+        container.addView(label)
+        container.addView(input)
+
+        AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
+            .setView(container)
+            .setPositiveButton("💾 GUARDAR") { _, _ ->
+                val newName = input.text.toString().trim()
+                if (newName.isNotEmpty()) {
+                    userName = newName
+                    getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("USER_NAME", newName).apply()
+                    tvWelcomeHeader.text = "¡BIENVENIDO, ${userName.uppercase()}! | CAJA GOLD"
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun setupDualModeSelector() {
         val selectorCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(15, 12, 15, 12)
-            background = getGlassDrawable(Color.parseColor("#1500E5FF"), Color.parseColor("#3300E5FF"))
+            background = getGlassDrawable(Color.parseColor("#15FFD700"), Color.parseColor("#44FFD700"))
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
         }
 
         val tvTitle = TextView(this).apply {
-            text = "MODALIDAD DE TRABAJO EN ESTE DISPOSITIVO"
+            text = "MODALIDAD DE TRABAJO DE ESTE EQUIPO"
             textSize = 9f
-            TextColorHex("#00E5FF")
+            TextColorHex("#FFD700")
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
             setMargins(0, 0, 0, 6)
         }
@@ -396,7 +585,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         rbEmisor = RadioButton(this).apply {
             id = 1001
-            text = "📱 EMISOR (CAJA PRINCIPAL)"
+            text = "📱 EMISOR (CAJA)"
             setTextColor(Color.WHITE)
             textSize = 10f
             isChecked = isEmisorMode
@@ -426,7 +615,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         btnActionQR = Button(this).apply {
             textSize = 10f
-            setTextColor(Color.WHITE)
+            setTextColor(Color.BLACK)
             setTypeface(null, Typeface.BOLD)
             layoutParams = LinearLayout.LayoutParams(-1, (40 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 8, 0, 0) }
         }
@@ -442,11 +631,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun updateModeUI() {
         if (isEmisorMode) {
             btnActionQR.text = "📱 MOSTRAR MI QR A VENDEDORES (MODO EMISOR)"
-            btnActionQR.background = getGlassDrawable(Color.parseColor("#2200FF7F"), Color.parseColor("#8800FF7F"))
+            btnActionQR.background = getGlassDrawable(Color.parseColor("#FFD700"), Color.parseColor("#FFA500"))
             btnActionQR.setOnClickListener { showEmisorQRDialog() }
         } else {
             btnActionQR.text = "📷 VENDEDOR: ESCANEAR QR DE LA CAJA EMISORA"
-            btnActionQR.background = getGlassDrawable(Color.parseColor("#2200E5FF"), Color.parseColor("#8800E5FF"))
+            btnActionQR.background = getGlassDrawable(Color.parseColor("#00E5FF"), Color.parseColor("#00B0FF"))
             btnActionQR.setOnClickListener { openQRScanner() }
         }
     }
@@ -472,7 +661,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val cardGranTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(15, 12, 15, 12)
-            background = getGlassDrawable(Color.parseColor("#2500E5FF"), Color.parseColor("#AA00E5FF"))
+            background = getGlassDrawable(Color.parseColor("#25FFD700"), Color.parseColor("#AAFFD700"))
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 8, 0, 0) }
         }
         val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
@@ -480,20 +669,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val btnExport = Button(this).apply {
             text = "📁 DESCARGAS CSV"
             textSize = 9f
-            setTextColor(Color.WHITE)
-            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
+            setTextColor(Color.BLACK)
+            setTypeface(null, Typeface.BOLD)
+            background = getGlassDrawable(Color.parseColor("#FFD700"), Color.parseColor("#FFA500"))
             layoutParams = RelativeLayout.LayoutParams(-2, (32 * resources.displayMetrics.density).toInt()).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
             setOnClickListener { exportCierreDeCajaCSV() }
         }
         headerRow.addView(lblGran)
         headerRow.addView(btnExport)
 
-        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 24f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.DEFAULT_BOLD) }
-        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.7f }
+        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 24f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.DEFAULT_BOLD) }
+        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f }
         
+        tvUltimoPago = TextView(this).apply { 
+            text = "⚡ ÚLTIMO COBRO: Sin registros hoy"
+            textSize = 10f
+            setTextColor(Color.parseColor("#00FF7F"))
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+            setMargins(0, 6, 0, 0)
+        }
+
         cardGranTotal.addView(headerRow)
         cardGranTotal.addView(tvGranTotal)
         cardGranTotal.addView(tvCantPagos)
+        cardGranTotal.addView(tvUltimoPago)
 
         grid.addView(row1)
         grid.addView(row2)
@@ -518,7 +717,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(0, 4, 0, 8) }
-            background = getGlassDrawable(Color.parseColor("#AA000000"), Color.parseColor("#2200E5FF"))
+            background = getGlassDrawable(Color.parseColor("#CC05070A"), Color.parseColor("#44FFD700"))
             padding(12, 10, 12, 10)
         }
 
@@ -526,16 +725,16 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val header = TextView(this).apply {
             text = "📋 HISTORIAL DE VENTAS Y COBROS"
             textSize = 9f
-            setTextColor(Color.parseColor("#8800E5FF"))
+            setTextColor(Color.parseColor("#FFD700"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val btnFiltrarSemanales = TextView(this).apply {
-            text = "🔍 ÚLTIMOS 7 DÍAS"
+            text = "📅 ÚLTIMOS 7 DÍAS ▾"
             textSize = 9f
-            setTextColor(Color.parseColor("#00E5FF"))
+            setTextColor(Color.parseColor("#FFD700"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
             layoutParams = RelativeLayout.LayoutParams(-2, -2).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
-            setOnClickListener { showWeeklyDialog() }
+            setOnClickListener { showWeeklyDatePickerDialog() }
         }
         headerRow.addView(header)
         headerRow.addView(btnFiltrarSemanales)
@@ -544,24 +743,53 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         rvPayments = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
             layoutParams = LinearLayout.LayoutParams(-1, -1)
+            isVerticalScrollBarEnabled = true
         }
-        adapter = PaymentAdapter(paymentList)
+        adapter = PaymentAdapter(filteredList)
         rvPayments.adapter = adapter
         container.addView(rvPayments)
 
         mainLayout.addView(container)
     }
 
-    private fun showWeeklyDialog() {
-        val count = paymentList.size
-        var totalSemanual = 0.0
-        for (p in paymentList) totalSemanual += p.amount
+    private fun showWeeklyDatePickerDialog() {
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dateDisplayFormat = SimpleDateFormat("EEEE dd/MM", Locale("es", "PE"))
+
+        val dates = mutableListOf<String>()
+        val dateLabels = mutableListOf<String>()
+
+        val cal = Calendar.getInstance()
+        for (i in 0..6) {
+            val d = sdf.format(cal.time)
+            val label = if (i == 0) "HOY (${dateDisplayFormat.format(cal.time)})" else dateDisplayFormat.format(cal.time)
+            dates.add(d)
+            dateLabels.add(label)
+            cal.add(Calendar.DAY_OF_YEAR, -1)
+        }
 
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
-            .setTitle("📅 REGISTRO DE ÚLTIMOS 7 DÍAS")
-            .setMessage("Se han registrado $count transacciones acumuladas en la última semana.\n\nMonto Acumulado 7 días: S/ ${String.format(Locale.US, "%.2f", totalSemanual)}")
-            .setPositiveButton("CERRAR", null)
+            .setTitle("📅 SELECCIONAR FECHA (ÚLTIMOS 7 DÍAS)")
+            .setItems(dateLabels.toTypedArray()) { _, which ->
+                selectedFilterDate = dates[which]
+                filterHistoryByDate(selectedFilterDate)
+                Toast.makeText(this, "Filtrado por: ${dateLabels[which]}", Toast.LENGTH_SHORT).show()
+            }
+            .setPositiveButton("MOSTRAR TODOS (7 DÍAS)") { _, _ ->
+                selectedFilterDate = ""
+                filterHistoryByDate("")
+            }
             .show()
+    }
+
+    private fun filterHistoryByDate(targetDate: String) {
+        filteredList.clear()
+        if (targetDate.isEmpty()) {
+            filteredList.addAll(paymentList)
+        } else {
+            filteredList.addAll(paymentList.filter { it.date == targetDate })
+        }
+        adapter.notifyDataSetChanged()
     }
 
     private fun updateTotals() {
@@ -589,6 +817,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
         tvCantPagos.text = "${todayPayments.size} cobro(s) registrados hoy (${paymentList.size} en 7 días)"
+
+        if (paymentList.isNotEmpty()) {
+            val last = paymentList[0]
+            tvUltimoPago.text = "⚡ ÚLTIMO COBRO: ${last.bank} S/ ${String.format(Locale.US, "%.2f", last.amount)} - ${last.name} (${last.time})"
+        } else {
+            tvUltimoPago.text = "⚡ ÚLTIMO COBRO: Sin registros hoy"
+        }
     }
 
     private fun showCompaneroPopup(bank: String, name: String, amount: String) {
