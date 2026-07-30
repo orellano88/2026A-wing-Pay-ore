@@ -916,7 +916,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 if (key.isNotEmpty()) {
                     licenseKey = key
                     getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit().putString("LICENSE_KEY", key).apply()
-                    Toast.makeText(this, "Clave guardada: $key", Toast.LENGTH_SHORT).show()
+                    verifyLicenseWithGoogleSheet(key)
                 }
             }
             .setNegativeButton("Cerrar", null)
