@@ -61,6 +61,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var tvTotalOtros: TextView
     private lateinit var tvGranTotal: TextView
     private lateinit var tvCantPagos: TextView
+    private lateinit var tvUltimoPago: TextView
     
     // RecyclerView Historial
     private lateinit var rvPayments: RecyclerView
@@ -707,7 +708,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             .show()
     }
 
-    private fun showDayDetailsDialog(date: String, payments: List<PaymentRecord>) {
+    private fun showDayDetailsDialog(date: String, payments: List<PaymentItem>) {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             padding(30, 20, 30, 20)
