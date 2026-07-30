@@ -12,8 +12,10 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -30,7 +32,10 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.*
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -47,7 +52,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var rbCompanero: RadioButton
     private lateinit var btnActionQR: Button
     
-    // Visual Cards (Sección 6)
+    // Visual Cards (Sección 6 FERRETERÍA MAX)
     private lateinit var tvTotalYape: TextView
     private lateinit var tvTotalPlin: TextView
     private lateinit var tvTotalBcp: TextView
@@ -89,6 +94,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 runOnUiThread {
                     adapter.addPayment(item)
                     updateTotals()
+                    savePaymentsToStorage() // PERSISTENCIA DE DATOS DE COBRO
                     
                     if (!isEmisorMode && isRemote) {
                         showCompaneroPopup(bank, name, amtStr)
@@ -119,13 +125,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         currentTopic = prefs.getString("CLIENT_CODE", currentTopic) ?: currentTopic
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
 
-        // Sensor Shake
+        // Sensor Shake-to-Silence
         sensorManager = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         buildUI()
         setContentView(mainLayout)
         
+        // Cargar Historial Guardado (Caja Ferretera)
+        loadPaymentsFromStorage()
+        
+        // Auto-Exención de Batería (Doze Mode Killer Ferretero)
+        requestBatteryOptimizationExemption()
+
         startStatusMonitor()
         handleSOSIntent(intent)
         
@@ -147,6 +159,114 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     override fun onPause() {
         super.onPause()
         sensorManager?.unregisterListener(this)
+    }
+
+    // --------------------------------------------------------------------------------
+    // MEJORA 1: DOZE MODE KILLER (EXENCIÓN DE BATERÍA AUTOMÁTICA EN CAJA)
+    // --------------------------------------------------------------------------------
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {}
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------------------
+    // MEJORA 4: PERSISTENCIA Y EXPORTACIÓN DEL CIERRE DE CAJA FERRETERO
+    // --------------------------------------------------------------------------------
+    private fun savePaymentsToStorage() {
+        try {
+            val jsonArray = JSONArray()
+            for (p in paymentList) {
+                val obj = JSONObject().apply {
+                    put("bank", p.bank)
+                    put("name", p.name)
+                    put("amount", p.amount)
+                    put("time", p.time)
+                }
+                jsonArray.put(obj)
+            }
+            getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
+                .putString("SAVED_PAYMENTS_JSON", jsonArray.toString())
+                .apply()
+        } catch (e: Exception) {}
+    }
+
+    private fun loadPaymentsFromStorage() {
+        try {
+            val jsonStr = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+                .getString("SAVED_PAYMENTS_JSON", null) ?: return
+            val jsonArray = JSONArray(jsonStr)
+            paymentList.clear()
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                paymentList.add(PaymentItem(
+                    obj.getString("bank"),
+                    obj.getString("name"),
+                    obj.getDouble("amount"),
+                    obj.getString("time")
+                ))
+            }
+            adapter.notifyDataSetChanged()
+            updateTotals()
+        } catch (e: Exception) {}
+    }
+
+    private fun exportCierreDeCajaCSV() {
+        try {
+            val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date())
+            val fileName = "Cierre_Caja_Ferreteria_$dateStr.csv"
+            val file = File(getExternalFilesDir(null), fileName)
+
+            val sb = java.lang.StringBuilder()
+            sb.append("HORA,BANCO,CLIENTE,MONTO SOLES\n")
+
+            var totalYape = 0.0
+            var totalPlin = 0.0
+            var totalBcp = 0.0
+            var totalOtros = 0.0
+
+            for (p in paymentList) {
+                sb.append("${p.time},${p.bank},\"${p.name}\",${p.amount}\n")
+                when (p.bank.uppercase()) {
+                    "YAPE" -> totalYape += p.amount
+                    "PLIN" -> totalPlin += p.amount
+                    "BCP" -> totalBcp += p.amount
+                    else -> totalOtros += p.amount
+                }
+            }
+
+            val granTotal = totalYape + totalPlin + totalBcp + totalOtros
+            sb.append("\nRESUMEN DE CIERRE FERRETERO\n")
+            sb.append("TOTAL YAPE,S/ $totalYape\n")
+            sb.append("TOTAL PLIN,S/ $totalPlin\n")
+            sb.append("TOTAL BCP,S/ $totalBcp\n")
+            sb.append("TOTAL OTROS,S/ $totalOtros\n")
+            sb.append("GRAN TOTAL DEL DIA,S/ $granTotal\n")
+            sb.append("TOTAL OPERACIONES,${paymentList.size}\n")
+
+            FileOutputStream(file).use { it.write(sb.toString().toByteArray()) }
+
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr")
+                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera acumulado el $dateStr.\nGran Total: S/ $granTotal (${paymentList.size} operaciones).")
+                val fileUri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
+                putExtra(Intent.EXTRA_STREAM, fileUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, "Enviar Cierre de Caja a Dueño/Administrador"))
+
+        } catch (e: Exception) {
+            Toast.makeText(this, "Reporte generado en almacenamiento local", Toast.LENGTH_LONG).show()
+        }
     }
 
     // --------------------------------------------------------------------------------
@@ -172,7 +292,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun buildUI() {
         mainLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(25, 25, 25, 25)
+            setPadding(25, 20, 25, 20)
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, 
                 intArrayOf(Color.parseColor("#0F141C"), Color.parseColor("#080B10"), Color.BLACK))
         }
@@ -186,11 +306,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun setupHeader() {
-        val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,15) } }
+        val header = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0,0,0,10) } }
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "WINGPAY TITAN MAX • v72.0"; textSize = 18f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
-            addView(TextView(this@MainActivity).apply { text = "SISTEMA DESCENTRALIZADO DE PAGOS MULTI-CANAL"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
+            addView(TextView(this@MainActivity).apply { text = "WINGPAY FERRETERO TITAN • v73.0"; textSize = 17f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "SISTEMA NATIVO DE CONTROL DE COBROS Y CAJA FERRETERA"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f })
         }
         header.addView(titleLayout)
 
@@ -199,10 +319,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = RelativeLayout.LayoutParams(-2, -2).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT); addRule(RelativeLayout.CENTER_VERTICAL) }
             
-            statusLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(20, 20); background = getCircleDrawable(Color.RED) }
-            val statusText = TextView(this@MainActivity).apply { text = " ESTADO"; textSize = 8f; setTextColor(Color.WHITE); setPadding(4, 0, 10, 0); alpha = 0.8f }
+            statusLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(18, 18); background = getCircleDrawable(Color.RED) }
+            val statusText = TextView(this@MainActivity).apply { text = " CAJA"; textSize = 8f; setTextColor(Color.WHITE); setPadding(4, 0, 8, 0); alpha = 0.8f }
             
-            syncLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(20, 20); background = getCircleDrawable(Color.GRAY) }
+            syncLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(18, 18); background = getCircleDrawable(Color.GRAY) }
             val syncText = TextView(this@MainActivity).apply { text = " RED"; textSize = 8f; setTextColor(Color.WHITE); setPadding(4, 0, 0, 0); alpha = 0.8f }
             
             addView(statusLED); addView(statusText)
@@ -212,23 +332,20 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         mainLayout.addView(header)
     }
 
-    // --------------------------------------------------------------------------------
-    // SELECTOR DUAL (SECCIÓN 1)
-    // --------------------------------------------------------------------------------
     private fun setupDualModeSelector() {
         val selectorCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            padding(20, 15, 20, 15)
+            padding(15, 12, 15, 12)
             background = getGlassDrawable(Color.parseColor("#1500E5FF"), Color.parseColor("#3300E5FF"))
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
         }
 
         val tvTitle = TextView(this).apply {
-            text = "MODALIDAD DE TRABAJO EN APK"
-            textSize = 10f
+            text = "MODALIDAD FERRETERA EN APK"
+            textSize = 9f
             TextColorHex("#00E5FF")
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-            setMargins(0, 0, 0, 8)
+            setMargins(0, 0, 0, 6)
         }
 
         modeRadioGroup = RadioGroup(this).apply {
@@ -237,17 +354,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         rbEmisor = RadioButton(this).apply {
-            text = "📱 MODO EMISOR (CAJA)"
+            text = "📱 EMISOR (CAJA PRINCIPAL)"
             setTextColor(Color.WHITE)
-            textSize = 11f
+            textSize = 10f
             isChecked = isEmisorMode
             layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
         }
 
         rbCompanero = RadioButton(this).apply {
-            text = "📱 MODO COMPAÑERO (RECEPTOR)"
+            text = "📱 COMPAÑERO (MOZOS/VENDEDOR)"
             setTextColor(Color.WHITE)
-            textSize = 11f
+            textSize = 10f
             isChecked = !isEmisorMode
             layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
         }
@@ -265,10 +382,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         btnActionQR = Button(this).apply {
-            textSize = 11f
+            textSize = 10f
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 10, 0, 0) }
+            layoutParams = LinearLayout.LayoutParams(-1, (40 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 8, 0, 0) }
         }
 
         selectorCard.addView(tvTitle)
@@ -281,49 +398,58 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun updateModeUI() {
         if (isEmisorMode) {
-            btnActionQR.text = "📱 VER MI QR EMISOR"
+            btnActionQR.text = "📱 VER MI QR EMISOR CAJA"
             btnActionQR.background = getGlassDrawable(Color.parseColor("#2200FF7F"), Color.parseColor("#8800FF7F"))
             btnActionQR.setOnClickListener { showEmisorQRDialog() }
         } else {
-            btnActionQR.text = "📷 ESCANEAR QR DEL EMISOR"
+            btnActionQR.text = "📷 ESCANEAR QR CAJA EMISOR"
             btnActionQR.background = getGlassDrawable(Color.parseColor("#2200E5FF"), Color.parseColor("#8800E5FF"))
             btnActionQR.setOnClickListener { openQRScanner() }
         }
     }
 
-    // --------------------------------------------------------------------------------
-    // TARJETAS DE RESUMEN FINANCIERO (SECCIÓN 6)
-    // --------------------------------------------------------------------------------
     private fun setupFinancialCards() {
         val grid = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 15) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 10) }
         }
 
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f }
-        val cardYape = createMiniCard("🟣 TOTAL YAPE", "#FF007F").also { tvTotalYape = it.second }
-        val cardPlin = createMiniCard("🔵 TOTAL PLIN", "#00E5FF").also { tvTotalPlin = it.second }
-        row1.addView(cardYape.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 6, 0) })
-        row1.addView(cardPlin.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(6, 0, 0, 0) })
+        val cardYape = createMiniCard("🟣 YAPE CAJA", "#FF007F").also { tvTotalYape = it.second }
+        val cardPlin = createMiniCard("🔵 PLIN CAJA", "#00E5FF").also { tvTotalPlin = it.second }
+        row1.addView(cardYape.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 4, 0) })
+        row1.addView(cardPlin.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 0, 0) })
 
-        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f; setMargins(0, 10, 0, 0) }
-        val cardBcp = createMiniCard("🟠 BCP DIRECTO", "#FFC107").also { tvTotalBcp = it.second }
-        val cardOtros = createMiniCard("🟢 OTROS / WA", "#2ECC71").also { tvTotalOtros = it.second }
-        row2.addView(cardBcp.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 6, 0) })
-        row2.addView(cardOtros.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(6, 0, 0, 0) })
+        val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; weightSum = 2f; setMargins(0, 6, 0, 0) }
+        val cardBcp = createMiniCard("🟠 BCP TELECRÉDITO", "#FFC107").also { tvTotalBcp = it.second }
+        val cardOtros = createMiniCard("🟢 OTROS / BANCOS", "#2ECC71").also { tvTotalOtros = it.second }
+        row2.addView(cardBcp.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(0, 0, 4, 0) })
+        row2.addView(cardOtros.first, LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 0, 0, 0) })
 
-        // Gran Total Card
+        // Gran Total Card + Botón Cierre de Caja
         val cardGranTotal = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            padding(20, 15, 20, 15)
+            padding(15, 12, 15, 12)
             background = getGlassDrawable(Color.parseColor("#2500E5FF"), Color.parseColor("#AA00E5FF"))
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 0) }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 8, 0, 0) }
         }
-        val lblGran = TextView(this).apply { text = "💰 GRAN TOTAL DEL DÍA"; textSize = 11f; setTextColor(Color.WHITE); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
-        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 26f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.DEFAULT_BOLD) }
-        tvCantPagos = TextView(this).apply { text = "0 pagos registrados hoy"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.7f }
+        val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
+        val lblGran = TextView(this).apply { text = "💰 RECAUDACIÓN DEL DÍA"; textSize = 10f; setTextColor(Color.WHITE); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
+        val btnExport = Button(this).apply {
+            text = "📊 CIERRE CAJA"
+            textSize = 9f
+            setTextColor(Color.WHITE)
+            background = getGlassDrawable(Color.parseColor("#332ECC71"), Color.parseColor("#2ECC71"))
+            layoutParams = RelativeLayout.LayoutParams(-2, (32 * resources.displayMetrics.density).toInt()).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
+            setOnClickListener { exportCierreDeCajaCSV() }
+        }
+        headerRow.addView(lblGran)
+        headerRow.addView(btnExport)
+
+        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 24f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.DEFAULT_BOLD) }
+        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.7f }
         
-        cardGranTotal.addView(lblGran)
+        cardGranTotal.addView(headerRow)
         cardGranTotal.addView(tvGranTotal)
         cardGranTotal.addView(tvCantPagos)
 
@@ -336,33 +462,30 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun createMiniCard(title: String, accentHex: String): Pair<LinearLayout, TextView> {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            padding(15, 12, 15, 12)
+            padding(12, 10, 12, 10)
             background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor(accentHex))
         }
-        val tvTitle = TextView(this).apply { text = title; textSize = 9f; setTextColor(Color.WHITE); alpha = 0.8f; setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
-        val tvValue = TextView(this).apply { text = "S/ 0.00"; textSize = 15f; setTextColor(Color.parseColor(accentHex)); setTypeface(Typeface.DEFAULT_BOLD) }
+        val tvTitle = TextView(this).apply { text = title; textSize = 8f; setTextColor(Color.WHITE); alpha = 0.8f; setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
+        val tvValue = TextView(this).apply { text = "S/ 0.00"; textSize = 14f; setTextColor(Color.parseColor(accentHex)); setTypeface(Typeface.DEFAULT_BOLD) }
         container.addView(tvTitle)
         container.addView(tvValue)
         return Pair(container, tvValue)
     }
 
-    // --------------------------------------------------------------------------------
-    // RECYCLERVIEW HISTORIAL (SECCIÓN 6)
-    // --------------------------------------------------------------------------------
     private fun setupHistoryRecyclerView() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(0, 5, 0, 10) }
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(0, 4, 0, 8) }
             background = getGlassDrawable(Color.parseColor("#AA000000"), Color.parseColor("#2200E5FF"))
-            padding(15, 15, 15, 15)
+            padding(12, 10, 12, 10)
         }
 
         val header = TextView(this).apply {
-            text = "📋 HISTORIAL DE TRANSACCIONES HOY"
+            text = "📋 HISTORIAL DE VENTAS Y COBROS"
             textSize = 9f
             setTextColor(Color.parseColor("#8800E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-            setMargins(0, 0, 0, 10)
+            setMargins(0, 0, 0, 6)
         }
         container.addView(header)
 
@@ -387,7 +510,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             when (p.bank.uppercase()) {
                 "YAPE" -> totalYape += p.amount
                 "PLIN" -> totalPlin += p.amount
-                "BCP" -> totalBcp += p.amount
+                "BCP", "BCP DIRECTO" -> totalBcp += p.amount
                 else -> totalOtros += p.amount
             }
         }
@@ -398,40 +521,37 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvTotalBcp.text = String.format(Locale.US, "S/ %.2f", totalBcp)
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
-        tvCantPagos.text = "${paymentList.size} cobro(s) acumulado(s) el día de hoy"
+        tvCantPagos.text = "${paymentList.size} cobro(s) en caja registrado(s)"
     }
 
-    // --------------------------------------------------------------------------------
-    // POPUP MODO COMPAÑERO (SECCIÓN 1-B)
-    // --------------------------------------------------------------------------------
     private fun showCompaneroPopup(bank: String, name: String, amount: String) {
         val popupView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            padding(40, 30, 40, 30)
+            padding(35, 25, 35, 25)
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#F20F141C"))
-                cornerRadius = 35f
+                cornerRadius = 30f
                 setStroke(4, Color.parseColor("#00E5FF"))
             }
         }
 
         val title = TextView(this).apply {
-            text = "⚡ CONFIRMADO EN CAJA"
-            textSize = 14f
+            text = "⚡ COBRO FERRETERO CONFIRMADO"
+            textSize = 13f
             setTextColor(Color.parseColor("#00E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val sub = TextView(this).apply {
             text = "$bank • S/ $amount"
-            textSize = 28f
+            textSize = 26f
             setTextColor(Color.WHITE)
             setTypeface(Typeface.DEFAULT_BOLD)
-            setMargins(0, 10, 0, 5)
+            setMargins(0, 8, 0, 4)
         }
         val client = TextView(this).apply {
             text = "Cliente: $name"
-            textSize = 16f
+            textSize = 15f
             setTextColor(Color.parseColor("#2ECC71"))
         }
 
@@ -440,7 +560,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         popupView.addView(client)
 
         popupWindow?.dismiss()
-        popupWindow = PopupWindow(popupView, (320 * resources.displayMetrics.density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
+        popupWindow = PopupWindow(popupView, (300 * resources.displayMetrics.density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
             animationStyle = android.R.style.Animation_Dialog
             showAtLocation(mainLayout, Gravity.CENTER, 0, 0)
         }
@@ -451,27 +571,24 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    // --------------------------------------------------------------------------------
-    // ACCIONES & QR DIALOGS
-    // --------------------------------------------------------------------------------
     private fun showEmisorQRDialog() {
         val qrBitmap = generateQRCode(currentTopic)
         val imgView = ImageView(this).apply {
             setImageBitmap(qrBitmap)
-            layoutParams = LinearLayout.LayoutParams(600, 600).apply { gravity = Gravity.CENTER }
+            layoutParams = LinearLayout.LayoutParams(550, 550).apply { gravity = Gravity.CENTER }
         }
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            padding(40, 30, 40, 30)
+            padding(30, 25, 30, 25)
             gravity = Gravity.CENTER
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#0F141C"))
                 cornerRadius = 25f
             }
-            addView(TextView(this@MainActivity).apply { text = "QR EMISOR - CLIENT_CODE"; textSize = 14f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,20) })
+            addView(TextView(this@MainActivity).apply { text = "QR VINCULACION VENDEDOR/MOZO"; textSize = 13f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,15) })
             addView(imgView)
-            addView(TextView(this@MainActivity).apply { text = currentTopic; textSize = 12f; setTextColor(Color.WHITE); setMargins(0,20,0,0) })
+            addView(TextView(this@MainActivity).apply { text = currentTopic; textSize = 11f; setTextColor(Color.WHITE); setMargins(0,15,0,0) })
         }
 
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
@@ -494,7 +611,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun setupSOSButton() {
-        sosStopBtn = Button(this).apply { text = "🛑 DETENER ALERTA MÓVIL"; layoutParams = LinearLayout.LayoutParams(-1, 110).apply { setMargins(0, 5, 0, 5) }; background = GradientDrawable().apply { setColor(Color.parseColor("#BBFF0000")); cornerRadius = 18f; setStroke(2, Color.WHITE) }; setTextColor(Color.WHITE); textSize = 14f; setTypeface(null, Typeface.BOLD); visibility = View.GONE; setOnClickListener { stopSOSProtocol() } }
+        sosStopBtn = Button(this).apply { text = "🛑 DETENER ALERTA MÓVIL"; layoutParams = LinearLayout.LayoutParams(-1, 100).apply { setMargins(0, 4, 0, 4) }; background = GradientDrawable().apply { setColor(Color.parseColor("#BBFF0000")); cornerRadius = 16f; setStroke(2, Color.WHITE) }; setTextColor(Color.WHITE); textSize = 13f; setTypeface(null, Typeface.BOLD); visibility = View.GONE; setOnClickListener { stopSOSProtocol() } }
         sosStopBtn?.let { mainLayout.addView(it) }
     }
 
@@ -514,15 +631,15 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun showVoiceMessageDialog() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            padding(40, 30, 40, 20)
+            padding(35, 25, 35, 20)
             background = GradientDrawable().apply { setColor(Color.parseColor("#0F141C")); cornerRadius = 24f }
         }
         val input = EditText(this).apply {
-            hint = "Escribe tu mensaje a la PC..."
+            hint = "Mensaje directo a PC..."
             setHintTextColor(Color.parseColor("#55FFFFFF"))
             setTextColor(Color.WHITE)
             background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#00E5FF"))
-            padding(25, 20, 25, 20)
+            padding(20, 15, 20, 15)
         }
         container.addView(input)
         AlertDialog.Builder(this, androidx.appcompat.R.style.Theme_AppCompat_Dialog)
@@ -576,11 +693,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun handleSOSIntent(intent: Intent?) { if (intent?.getBooleanExtra("VISUAL_SOS", false) == true) triggerVisualSOS() }
     override fun onNewIntent(intent: Intent?) { super.onNewIntent(intent); handleSOSIntent(intent) }
     private fun getCircleDrawable(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
-    private fun getGlassDrawable(color: Int, strokeColor: Int) = GradientDrawable().apply { setColor(color); cornerRadius = 18f; setStroke(2, strokeColor) }
+    private fun getGlassDrawable(color: Int, strokeColor: Int) = GradientDrawable().apply { setColor(color); cornerRadius = 16f; setStroke(2, strokeColor) }
     private fun createActionButton(txt: String, w: Float, action: () -> Unit) = Button(this).apply {
         text = txt
-        val heightPx = (65 * resources.displayMetrics.density).toInt()
-        layoutParams = LinearLayout.LayoutParams(0, heightPx, w).apply { setMargins(4, 4, 4, 4) }
+        val heightPx = (55 * resources.displayMetrics.density).toInt()
+        layoutParams = LinearLayout.LayoutParams(0, heightPx, w).apply { setMargins(3, 3, 3, 3) }
         background = getGlassDrawable(Color.parseColor("#1500E5FF"), Color.parseColor("#4400E5FF"))
         setTextColor(Color.WHITE)
         setTypeface(null, Typeface.BOLD)
@@ -597,64 +714,4 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         layoutParams = p
     }
     private fun TextView.TextColorHex(hex: String) = setTextColor(Color.parseColor(hex))
-}
-
-// --------------------------------------------------------------------------------
-// ADAPTER HISTORIAL (RECYCLERVIEW)
-// --------------------------------------------------------------------------------
-data class PaymentItem(val bank: String, val name: String, val amount: Double, val time: String)
-
-class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView.Adapter<PaymentAdapter.ViewHolder>() {
-    class ViewHolder(val view: LinearLayout, val tvBank: TextView, val tvName: TextView, val tvAmt: TextView, val tvTime: TextView) : RecyclerView.ViewHolder(view)
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
-        val ctx = parent.context
-        val container = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(15, 12, 15, 12)
-            layoutParams = RecyclerView.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 8) }
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#15FFFFFF"))
-                cornerRadius = 14f
-            }
-        }
-        val tvBank = TextView(ctx).apply { textSize = 10f; setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setPadding(0,0,15,0) }
-        val infoLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
-        val tvName = TextView(ctx).apply { textSize = 12f; setTextColor(Color.WHITE); setTypeface(Typeface.DEFAULT_BOLD) }
-        val tvTime = TextView(ctx).apply { textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f }
-        infoLayout.addView(tvName); infoLayout.addView(tvTime)
-
-        val tvAmt = TextView(ctx).apply { textSize = 14f; setTypeface(Typeface.DEFAULT_BOLD) }
-
-        container.addView(tvBank)
-        container.addView(infoLayout)
-        container.addView(tvAmt)
-
-        return ViewHolder(container, tvBank, tvName, tvAmt, tvTime)
-    }
-
-    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-        val item = items[position]
-        holder.tvBank.text = item.bank
-        holder.tvName.text = item.name
-        holder.tvTime.text = item.time
-        holder.tvAmt.text = String.format(Locale.US, "S/ %.2f", item.amount)
-
-        val colorHex = when (item.bank.uppercase()) {
-            "YAPE" -> "#FF007F"
-            "PLIN" -> "#00E5FF"
-            "BCP" -> "#FFC107"
-            else -> "#2ECC71"
-        }
-        holder.tvBank.setTextColor(Color.parseColor(colorHex))
-        holder.tvAmt.setTextColor(Color.parseColor(colorHex))
-    }
-
-    override fun getItemCount() = items.size
-
-    fun addPayment(item: PaymentItem) {
-        items.add(0, item)
-        notifyItemInserted(0)
-    }
 }

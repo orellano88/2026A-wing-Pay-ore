@@ -3,6 +3,7 @@ package com.inversioneswing.starkomega
 import android.app.*
 import android.content.*
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.*
@@ -25,6 +26,7 @@ import java.util.regex.Pattern
 class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
     private var job: Job? = null
+    private var udpJob: Job? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private lateinit var lock: PowerManager.WakeLock
     private var tts: TextToSpeech? = null
@@ -36,7 +38,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var sirenTone: ToneGenerator? = null
     private var panicLockActive = false
 
-    // Control de Duplicados (Sección 3: Ventana de 5 segundos)
+    // Control de Duplicados (Ventana de 5 segundos)
     private val processedNotifications = mutableMapOf<String, Long>()
 
     companion object {
@@ -51,14 +53,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         const val KEY_TEST = 5003
         const val KEY_SAY = 5004
 
-        // Lista Negra (Sección 5)
+        // Lista Negra Anti-Publicidad
         private val BLACKLIST_TERMS = listOf(
             "préstamo", "prestó", "crédito", "pre-aprobado", "solicita", 
             "pide tu", "promoción", "aprovecha", "línea de crédito", "cuota", 
             "descuento", "evaluación"
         )
 
-        // Lista Blanca (Sección 5)
+        // Lista Blanca de Validación
         private val WHITELIST_TERMS = listOf(
             "te envió", "recibiste s/", "te yapeó", "te plinó", "abono", 
             "depósito", "confirmación"
@@ -69,7 +71,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         super.onCreate()
         inst = this
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:omega_v72")
+        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:omega_v73")
         if (!lock.isHeld) lock.acquire()
         
         tts = TextToSpeech(this, this)
@@ -79,6 +81,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         isEmisorMode = prefs.getBoolean("IS_EMISOR_MODE", true)
 
         startPhantomListener()
+        startUDPListener() // RESPALDO OFFLINE LOCAL POR UDP 5005
     }
 
     override fun onInit(status: Int) {
@@ -86,7 +89,6 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val res = tts?.setLanguage(Locale("es", "PE"))
             if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
                 ttsOk = true
-                // AudioAttributes USAGE_MEDIA / USAGE_NOTIFICATION (Sección 3)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     val attrs = AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -99,7 +101,55 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     // --------------------------------------------------------------------------------
-    // RECEPTOR MODO COMPAÑERO / TRANSMISIÓN ESPEJO (SECCIÓN 1-B & 7)
+    // MEJORA 2: ESCUCHADOR UDP LOCAL 5005 (RESPALDO OFFLINE PARA COMPAÑEROS SIN INTERNET)
+    // --------------------------------------------------------------------------------
+    private fun startUDPListener() {
+        udpJob?.cancel()
+        udpJob = serviceScope.launch {
+            var socket: DatagramSocket? = null
+            try {
+                socket = DatagramSocket(5005)
+                val buffer = ByteArray(2048)
+                while (isActive) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    socket.receive(packet)
+                    val rawStr = String(packet.data, 0, packet.length)
+                    processUDPPayload(rawStr)
+                }
+            } catch (e: Exception) {
+                // Puerto en uso o cerrado
+            } finally {
+                socket?.close()
+            }
+        }
+    }
+
+    private fun processUDPPayload(jsonStr: String) {
+        try {
+            val j = JSONObject(jsonStr)
+            if (j.optString("type") == "WINGPAY_UDP") {
+                val bank = j.optString("bank", "PAGO")
+                val name = j.optString("name", "Cliente")
+                val amt = j.optString("amt", "0.00")
+
+                // Si estamos en Modo Compañero y cayó el internet, el paquete UDP local actuará de respaldo
+                if (!isEmisorMode) {
+                    val dedupKey = "UDP|$bank|$name|$amt"
+                    val now = System.currentTimeMillis()
+                    if (now - (processedNotifications[dedupKey] ?: 0L) < 5000) return
+                    processedNotifications[dedupKey] = now
+
+                    val spokenAmount = speakAmount(cleanAmountString(amt))
+                    val vocalization = "Confirmado en Caja por Red Local: $bank de $name por $spokenAmount."
+                    speak(vocalization, false)
+                    dispatchHUD(name, amt, bank, vocalization, true)
+                }
+            }
+        } catch (e: Exception) {}
+    }
+
+    // --------------------------------------------------------------------------------
+    // RECEPTOR MODO COMPAÑERO / TRANSMISIÓN ESPEJO (NTFY NUBE)
     // --------------------------------------------------------------------------------
     private fun startPhantomListener() {
         job?.cancel()
@@ -135,11 +185,15 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 if (msg.isNotEmpty()) speak(msg, false)
             }
 
-            // Modo Compañero: Recibe transmisión de Caja / Emisor (Sección 1-B)
             if (!isEmisorMode && type == "PAYMENT_TRANSMISSION") {
                 val bank = j.optString("bank", "PAGO")
                 val name = j.optString("name", "Cliente")
                 val amt = j.optString("amt", "0.00")
+
+                val dedupKey = "NTFY|$bank|$name|$amt"
+                val now = System.currentTimeMillis()
+                if (now - (processedNotifications[dedupKey] ?: 0L) < 5000) return
+                processedNotifications[dedupKey] = now
 
                 val spokenAmount = speakAmount(cleanAmountString(amt))
                 val vocalization = "Confirmado en Caja: $bank de $name por $spokenAmount."
@@ -152,16 +206,17 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     // --------------------------------------------------------------------------------
-    // NOTIFICATION LISTENER ENGINE (SECCIÓN 1-A, 2, 3, 5)
+    // NOTIFICATION LISTENER ENGINE (FILTROS Y VERIFICACIÓN ANTIFRAUDE)
     // --------------------------------------------------------------------------------
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        // En Modo Compañero se desactiva la captura de notificaciones locales (Sección 1-B)
         if (!isEmisorMode || panicLockActive) return
 
         val pkg = sbn.packageName.lowercase()
         if (pkg.contains("ntfy")) return
 
-        // Identificación por nombre de paquete oficial (Sección 2)
+        // --------------------------------------------------------------------------------
+        // MEJORA 5: VERIFICACIÓN ANTIFRAUDE DE ORIGEN ESTRUCTURAL NATIVO
+        // --------------------------------------------------------------------------------
         val validPackages = listOf(
             "com.bcp.bank.yape", "com.bcp.bank.bcap", 
             "com.bbva.netcash", "com.bbva.mobile",
@@ -178,18 +233,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         val rawContent = "$title $text".trim()
         val lowerContent = rawContent.lowercase()
 
-        // --------------------------------------------------------------------------------
-        // 5. FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS (CERO FALSOS POSITIVOS)
-        // --------------------------------------------------------------------------------
+        // FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS
         val hasBlacklist = BLACKLIST_TERMS.any { lowerContent.contains(it) }
-        if (hasBlacklist) return // Descarte en 0ms sin log ni voz
+        if (hasBlacklist) return
 
         val hasWhitelist = WHITELIST_TERMS.any { lowerContent.contains(it) } || rawContent.contains("S/", ignoreCase = true)
         if (!hasWhitelist) return
 
-        // --------------------------------------------------------------------------------
-        // 2. EXPRESIONES REGULARES DE ALTA PRECISIÓN (MONTO & REMITENTE)
-        // --------------------------------------------------------------------------------
+        // REGEX PARSER ENGINE
         val amountPattern = Pattern.compile("(?i)(?:S/|S/\\.)\\s*([\\d.,]+)")
         val amountMatcher = amountPattern.matcher(rawContent)
 
@@ -204,34 +255,53 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
             val bankName = identifyBank(pkg, rawContent)
 
-            // --------------------------------------------------------------------------------
-            // 3. MAPA DE CONTROL DE DUPLICADOS (VENTANA DE 5 SEGUNDOS)
-            // --------------------------------------------------------------------------------
-            val dedupKey = "$bankName|$senderName|$cleanedAmount"
+            // DEDUPLICACIÓN EN EMISOR
+            val dedupKey = "EMISOR|$bankName|$senderName|$cleanedAmount"
             val now = System.currentTimeMillis()
             val lastSeen = processedNotifications[dedupKey] ?: 0L
             if (now - lastSeen < 5000) return
             processedNotifications[dedupKey] = now
 
-            // --------------------------------------------------------------------------------
-            // VOCALIZACIÓN EN LENGUAJE NATURAL PERUANO
-            // --------------------------------------------------------------------------------
             val spokenAmount = speakAmount(cleanedAmount)
             val speechText = "Depósito de $senderName por $spokenAmount en $bankName."
-            speak(speechText, false)
+            
+            // VOCALIZACIÓN CON AUDIOFOCUS & FORZADO DE VOLUMEN FERRETERO
+            speakWithMaxVolumeFocus(speechText)
 
             dispatchHUD(senderName, cleanedAmount, bankName, speechText, false)
 
-            // --------------------------------------------------------------------------------
-            // 7. TRANSMISIÓN PARALELA MULTIDESTINO Y RED ESPEJO (NTFY + UDP BROADCAST 5005)
-            // --------------------------------------------------------------------------------
+            // TRANSMISIÓN PARALELA (NTFY + UDP 5005)
             syncParallelMultidestino(bankName, senderName, cleanedAmount, speechText)
         }
     }
 
     // --------------------------------------------------------------------------------
-    // FORMATEO & VOZ PERUANA (SECCIÓN 2)
+    // MEJORA 3: CONTROL DE VOLUMEN FORZADO CON AUDIOFOCUS PARA LOCATORIOS FERRETEROS
     // --------------------------------------------------------------------------------
+    private fun speakWithMaxVolumeFocus(text: String) {
+        if (text.isEmpty() || !ttsOk) return
+        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        
+        // Forzar volumen multimedia a nivel nitido
+        am.setStreamVolume(AudioManager.STREAM_MUSIC, (maxVol * 0.9).toInt(), 0)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                ).build()
+            am.requestAudioFocus(focusRequest)
+        } else {
+            am.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+        }
+
+        speak(text, false)
+    }
+
     private fun cleanAmountString(amountStr: String?): String {
         if (amountStr.isNullOrEmpty()) return "0"
         val cleanStr = amountStr.replace(Regex("[^\\d.,]"), "").trim('.', ',')
@@ -291,12 +361,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         else -> "Banco"
     }
 
-    // --------------------------------------------------------------------------------
-    // SECCIÓN 7: TRANSMISIÓN PARALELA (NTFY CLOUD + UDP BROADCAST PORT 5005)
-    // --------------------------------------------------------------------------------
     private fun syncParallelMultidestino(b: String, n: String, a: String, msg: String) {
         serviceScope.launch {
-            // Emisión 1: Servidor NTFY en la Nube
+            // Emisión 1: Nube NTFY
             try {
                 val url = URL("https://ntfy.sh/$topic")
                 (url.openConnection() as HttpURLConnection).apply {
@@ -317,7 +384,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 }
             } catch (e: Exception) {}
 
-            // Emisión 2: Paquete UDP Broadcast Local al puerto 5005
+            // Emisión 2: UDP Broadcast Local 5005
             try {
                 val udpSocket = DatagramSocket()
                 udpSocket.broadcast = true
@@ -355,7 +422,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     fun speak(text: String, flush: Boolean = true) {
         if (text.isEmpty() || !ttsOk) return
-        val p = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_ALARM) }
+        val p = Bundle().apply { putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC) }
         val mode = if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
         tts?.speak(text, mode, p, "WINGPAY_TTS_" + System.currentTimeMillis())
     }
@@ -373,7 +440,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     KEY_SOS -> sendSOS()
                     KEY_POLICE -> executePoliceProtocol()
                     KEY_TEST -> {
-                        speak("WINGPAY SISTEMA ONLINE. ENLACE VERIFICADO.")
+                        speakWithMaxVolumeFocus("WINGPAY SISTEMA FERRETERO ONLINE. ENLACE NATIVO VERIFICADO.")
                         dispatchHUD("VERIFICACIÓN", "1.00", "WINGPAY", "TEST", false)
                         syncParallelMultidestino("WINGPAY", "TEST", "1.00", "PRUEBA DE TRANSMISION")
                     }
@@ -429,7 +496,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             stopSiren()
             panicLockActive = false
         }
-        speak("ALERTA STARK: EMERGENCIA EN CURSO. REVISIÓN DE CÁMARAS.")
+        speakWithMaxVolumeFocus("ALERTA FERRETERA: EMERGENCIA EN CAJA. REVISIÓN DE CÁMARAS.")
     }
 
     fun stopSiren() { 
@@ -440,10 +507,10 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     private fun executePoliceProtocol() {
         panicLockActive = true
-        val msg = "ATENCION. Se ha activado la alarma de seguridad. La policia ya fue notificada y las camaras estan transmitiendo en vivo."
+        val msg = "ATENCION. Se ha activado la alarma de seguridad ferretera. La policia fue notificada y las camaras estan transmitiendo en vivo."
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
-        speak(msg, true)
+        speakWithMaxVolumeFocus(msg)
     }
 
     fun sendSOS() {
@@ -472,8 +539,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         }
 
         val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("WingPay Titan Engine")
-            .setContentText("Vigilancia descentralizada activa")
+            .setContentTitle("WingPay Ferretero Engine v73.0")
+            .setContentText("Caja Principal Activa")
             .setSmallIcon(android.R.drawable.stat_notify_sync)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -483,6 +550,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     override fun onDestroy() {
         serviceScope.cancel()
+        udpJob?.cancel()
         tts?.shutdown()
         super.onDestroy()
     }
