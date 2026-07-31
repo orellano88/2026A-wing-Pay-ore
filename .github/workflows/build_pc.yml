@@ -21,16 +21,19 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller requests
+          pip install pyinstaller requests pygame pillow qrcode edge-tts
           
       - name: Build with PyInstaller
         run: |
           cd RECEPTOR_PC
-          pyinstaller --noconfirm --onefile --windowed --name "WingPay_Receptor_PC" receptor.py
+          pyinstaller --noconfirm --onefile --windowed --add-data "frases_exito.txt;." --name "WingPay_Receptor_PC" "RECEPTOR PC.pyw"
           
       - name: Release EXE
         uses: softprops/action-gh-release@v1
         with:
-          files: RECEPTOR_PC/dist/WingPay_Receptor_PC.exe
+          files: |
+            RECEPTOR_PC/dist/WingPay_Receptor_PC.exe
+            RECEPTOR_PC/frases_exito.txt
+            RECEPTOR_PC/LanzarCentinela.vbs
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
