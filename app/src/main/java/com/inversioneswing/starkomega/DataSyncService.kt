@@ -513,11 +513,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun executePoliceProtocol() {
-        panicLockActive = true
         val msg = "ATENCION. Se ha activado la alarma de seguridad ferretera. La policia fue notificada y las camaras estan transmitiendo en vivo."
-        val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        am.setStreamVolume(AudioManager.STREAM_ALARM, am.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
         speakWithMaxVolumeFocus(msg)
+        sendVoiceToPC(msg)
     }
 
     fun sendSOS() {

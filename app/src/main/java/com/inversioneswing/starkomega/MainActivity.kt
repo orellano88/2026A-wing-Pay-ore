@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
     }
 
-    private fun verifyLicenseWithGoogleSheet(key: String) {
+    private fun verifyLicenseWithGoogleSheet(key: String, isManualUpdate: Boolean = false) {
         val currentDeviceId = getHardwareDeviceId()
         mainScope.launch(Dispatchers.IO) {
             var status = "OFFLINE_OK"
@@ -247,7 +247,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     else -> {
                         getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
                             .putString("LICENSE_KEY", key).apply()
-                        recreate()
+                        if (isManualUpdate) recreate()
                     }
                 }
             }
@@ -440,7 +440,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             addView(TextView(this@MainActivity).apply { text = "👑 IMPORTACIONES WING PAGOS • v999.0 GOLD"; textSize = 16f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             addView(TextView(this@MainActivity).apply { 
                 text = if (userName.isNotEmpty()) "¡BIENVENIDO $userName! | CAJA GOLD WING • CANAL: $currentTopic" else "¡BIENVENIDO! | CAJA GOLD WING • CANAL: $currentTopic"
-                textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.9f 
+                textSize = 13f; setTextColor(Color.parseColor("#FFF8DC")); setTypeface(null, Typeface.BOLD); alpha = 0.9f 
             })
         }
         header.addView(titleLayout)
@@ -1048,7 +1048,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         .putString("LICENSE_KEY", key)
                         .putString("USER_NAME", name)
                         .apply()
-                    verifyLicenseWithGoogleSheet(key)
+                    verifyLicenseWithGoogleSheet(key, true)
                 } else if (name.isNotEmpty()) {
                      getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
                         .putString("USER_NAME", name)
