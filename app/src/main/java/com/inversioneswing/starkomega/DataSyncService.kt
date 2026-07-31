@@ -53,17 +53,20 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         const val KEY_TEST = 5003
         const val KEY_SAY = 5004
 
-        // Lista Negra Anti-Publicidad
+        // Lista Negra Anti-Publicidad / Ofertas de Préstamos
         private val BLACKLIST_TERMS = listOf(
-            "préstamo", "prestó", "crédito", "pre-aprobado", "solicita", 
-            "pide tu", "promoción", "aprovecha", "línea de crédito", "cuota", 
-            "descuento", "evaluación"
+            "solicita tu préstamo", "solicita tu prestamo", "crédito pre-aprobado", "credito pre-aprobado", 
+            "crédito preaprobado", "credito preaprobado", "pide tu préstamo", "pide tu prestamo",
+            "línea de crédito", "linea de credito", "evaluación crediticia", "evaluacion crediticia",
+            "pide tu credito", "pide tu crédito"
         )
 
         // Lista Blanca de Validación
         private val WHITELIST_TERMS = listOf(
-            "te envió", "recibiste s/", "te yapeó", "te plinó", "abono", 
-            "depósito", "confirmación"
+            "te envió", "te envio", "recibiste", "te yapeó", "te yapeo", "yapearon", "yapeo", "yapeó", "yapeaste",
+            "te plinó", "te plino", "plinaron", "abono", "abonó", "depósito", "deposito", 
+            "confirmación", "confirmacion", "transferencia", "ingreso", "recibido", "pago", "pagó",
+            "yape!", "yape", "plin!", "plin", "bcp", "bbva", "interbank", "scotia", "soles"
         )
     }
 
@@ -214,52 +217,77 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         val pkg = sbn.packageName.lowercase()
         if (pkg.contains("ntfy")) return
 
+        val ex = sbn.notification.extras
+        val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+        val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        val bigText = ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+        val subText = ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
+        val ticker = sbn.notification.tickerText?.toString() ?: ""
+        val rawContent = "$title $text $bigText $subText $ticker".trim()
+        val lowerContent = rawContent.lowercase()
+
         // --------------------------------------------------------------------------------
-        // MEJORA 5: VERIFICACIÓN ANTIFRAUDE DE ORIGEN ESTRUCTURAL NATIVO
+        // FILTROS DE IDENTIFICACIÓN DE APLICACIÓN Y CONTENIDO DE PAGO
         // --------------------------------------------------------------------------------
         val validPackages = listOf(
             "com.bcp.bank.yape", "com.bcp.bank.bcap", 
             "com.bbva.netcash", "com.bbva.mobile",
             "com.interbank.mobilebanking", "com.scotiabank.peru",
-            "com.whatsapp", "com.whatsapp.w4b"
+            "com.whatsapp", "com.whatsapp.w4b",
+            "com.google.android.apps.messaging", "com.samsung.android.messaging",
+            "com.android.mms", "com.android.messaging"
         )
-        val isTargetApp = validPackages.any { pkg.contains(it) } || listOf("yape", "plin", "bcp", "bbva", "interbank", "scotia", "banco").any { pkg.contains(it) }
+        val isTargetPkg = validPackages.any { pkg.contains(it) } || 
+                listOf("yape", "plin", "bcp", "bbva", "interbank", "scotia", "banco", "tunki", "bim", "agora", "pay", "wallet", "message", "sms").any { pkg.contains(it) }
 
-        if (!isTargetApp) return
+        val containsPaymentKeyword = lowerContent.contains("yape") || lowerContent.contains("plin") || lowerContent.contains("bcp") || lowerContent.contains("transferencia") || lowerContent.contains("s/") || lowerContent.contains("soles")
 
-        val ex = sbn.notification.extras
-        val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-        val rawContent = "$title $text".trim()
-        val lowerContent = rawContent.lowercase()
+        if (!isTargetPkg && !containsPaymentKeyword) return
 
         // FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS
         val hasBlacklist = BLACKLIST_TERMS.any { lowerContent.contains(it) }
         if (hasBlacklist) return
 
-        val hasWhitelist = WHITELIST_TERMS.any { lowerContent.contains(it) } || rawContent.contains("S/", ignoreCase = true)
+        val hasWhitelist = WHITELIST_TERMS.any { lowerContent.contains(it) } || rawContent.contains("S/", ignoreCase = true) || rawContent.contains("soles", ignoreCase = true)
         if (!hasWhitelist) return
 
-        // REGEX PARSER ENGINE
-        val amountPattern = Pattern.compile("(?i)(?:S/|S/\\.)\\s*([\\d.,]+)")
+        // REGEX PARSER ENGINE PARA MONTO
+        val amountPattern = Pattern.compile("(?i)(?:S/|S/\\.|soles)\\s*([\\d.,]+)|([\\d.,]+)\\s*(?:soles)")
         val amountMatcher = amountPattern.matcher(rawContent)
 
         if (amountMatcher.find()) {
-            val rawAmountStr = amountMatcher.group(1) ?: "0.00"
+            val rawAmountStr = amountMatcher.group(1) ?: amountMatcher.group(2) ?: "0.00"
             val cleanedAmount = cleanAmountString(rawAmountStr)
+            if (cleanedAmount == "0" || cleanedAmount.isEmpty()) return
 
-            val senderPattern = Pattern.compile("(?:de|por|remitente:)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)", Pattern.CASE_INSENSITIVE)
-            val senderMatcher = senderPattern.matcher(rawContent)
-            var senderName = if (senderMatcher.find()) senderMatcher.group(1)?.trim() ?: "Cliente" else "Cliente"
-            senderName = cleanSenderName(senderName)
+            // EXTRACTOR INTELIGENTE DE REMITENTE
+            var senderName = ""
+            val titleLower = title.lowercase().trim()
+            val isGenericTitle = titleLower.isEmpty() || listOf("yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", "notificación", "notificacion", "mensaje", "whatsapp").any { titleLower == it || titleLower.startsWith(it) }
 
+            if (!isGenericTitle && title.length in 3..35 && !title.contains("S/", ignoreCase = true)) {
+                senderName = cleanSenderName(title)
+            }
+            
+            if (senderName.isEmpty() || senderName == "Cliente") {
+                val senderPattern = Pattern.compile("(?:de|por|remitente:)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)|([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio)", Pattern.CASE_INSENSITIVE)
+                val senderMatcher = senderPattern.matcher(rawContent)
+                if (senderMatcher.find()) {
+                    val candidate = senderMatcher.group(1) ?: senderMatcher.group(2)
+                    if (!candidate.isNullOrBlank()) {
+                        senderName = cleanSenderName(candidate.trim())
+                    }
+                }
+            }
+
+            if (senderName.isBlank()) senderName = "Cliente"
             val bankName = identifyBank(pkg, rawContent)
 
-            // DEDUPLICACIÓN EN EMISOR
+            // DEDUPLICACIÓN EN EMISOR (Ventana de 4 segundos)
             val dedupKey = "EMISOR|$bankName|$senderName|$cleanedAmount"
             val now = System.currentTimeMillis()
             val lastSeen = processedNotifications[dedupKey] ?: 0L
-            if (now - lastSeen < 5000) return
+            if (now - lastSeen < 4000) return
             processedNotifications[dedupKey] = now
 
             val spokenAmount = speakAmount(cleanedAmount)
@@ -345,9 +373,14 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun cleanSenderName(raw: String): String {
-        var clean = raw.replace(Regex("(?i)\\b(yapeaste|recibiste|transferencia|de|pago|enviado|recibido|te envió|soles|notificación|operación|código|nro|id|transacción|dni|banco|ahorros|corriente|has|un|por|a|comisión|ventas|exitoso|exitosa|cod|op|ref|vta|yape|plin)\\b"), " ")
+        var clean = raw.replace(Regex("(?i)\\b(yapeaste|yapearon|yapeo|yapeó|recibiste|transferencia|de|por|remitente|pago|enviado|recibido|te envió|te envio|soles|notificación|notificacion|operación|operacion|código|codigo|nro|id|transacción|transaccion|dni|banco|ahorros|corriente|has|un|a|comisión|comision|ventas|exitoso|exitosa|cod|op|ref|vta|yape|plin)\\b"), " ")
         clean = clean.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
-        return clean.split(" ").filter { it.length > 1 }.joinToString(" ") { it.lowercase().replaceFirstChar { c -> c.uppercase() } }
+        val words = clean.split(" ").filter { it.length > 1 }
+        return if (words.isNotEmpty()) {
+            words.take(4).joinToString(" ") { it.lowercase().replaceFirstChar { c -> c.uppercase() } }
+        } else {
+            "Cliente"
+        }
     }
 
     private fun identifyBank(pkg: String, raw: String): String = when {

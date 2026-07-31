@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var rbEmisor: RadioButton
     private lateinit var rbCompanero: RadioButton
     private lateinit var btnActionQR: Button
+    private lateinit var btnPermWarning: Button
     
     // Visual Cards (Sección 6 FERRETERÍA MAX)
     private lateinit var tvTotalYape: TextView
@@ -259,6 +260,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         accelerometer?.let {
             sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
+        updatePermissionWarningVisibility()
+        if (isNotificationServiceEnabled()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                try {
+                    android.service.notification.NotificationListenerService.requestRebind(
+                        ComponentName(this, DataSyncService::class.java)
+                    )
+                } catch (e: Exception) {}
+            }
+            relaunchService()
+        }
+    }
+
+    private fun isNotificationServiceEnabled(): Boolean {
+        val pkgName = packageName
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
+        if (!flat.isNullOrEmpty()) {
+            val names = flat.split(":")
+            for (name in names) {
+                val cn = ComponentName.unflattenFromString(name)
+                if (cn != null && cn.packageName == pkgName) {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    private fun updatePermissionWarningVisibility() {
+        if (::btnPermWarning.isInitialized) {
+            val hasPerm = isNotificationServiceEnabled()
+            btnPermWarning.visibility = if (hasPerm) View.GONE else View.VISIBLE
+        }
     }
 
     override fun onPause() {
@@ -461,6 +495,29 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
         header.addView(ledContainer)
         mainLayout.addView(header)
+
+        btnPermWarning = Button(this).apply {
+            text = "⚠️ ¡PERMISO DESACTIVADO! TOCA AQUÍ PARA OTORGAR ACCESO Y LEER YAPES AUTOMÁTICAMENTE"
+            textSize = 10f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#CCFF0033"))
+                cornerRadius = 14f
+                setStroke(2, Color.WHITE)
+            }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 4, 0, 10) }
+            setOnClickListener {
+                try {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                    Toast.makeText(this@MainActivity, "Busca 'WingPay' en la lista y ACTÍVALO", Toast.LENGTH_LONG).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this@MainActivity, "Abre Ajustes > Notificaciones > Acceso a notificaciones y activa WingPay", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
+        mainLayout.addView(btnPermWarning)
+        updatePermissionWarningVisibility()
     }
 
     private fun setupDualModeSelector() {
