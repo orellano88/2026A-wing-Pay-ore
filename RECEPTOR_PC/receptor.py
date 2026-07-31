@@ -148,6 +148,15 @@ class ReceptorApp:
             except Exception:
                 time.sleep(5)
 
+    def speak(self, text):
+        try:
+            # Eliminar comillas simples para evitar romper el script de powershell
+            clean_text = text.replace("'", "")
+            cmd = f'powershell -Command "Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak(\'{clean_text}\')"'
+            threading.Thread(target=lambda: os.system(cmd), daemon=True).start()
+        except:
+            pass
+
     def process_signal(self, line):
         try:
             data = json.loads(line)
@@ -166,13 +175,16 @@ class ReceptorApp:
                     name = j.get("name", "Cliente")
                     amt = j.get("amt", "0.00")
                     self.root.after(0, lambda: self.log_message(f"✅ {bank}\n💰 S/ {amt}\n👤 De: {name}", "green"))
+                    self.speak(f"Pago recibido en {bank} por {amt} soles.")
                 
                 elif type_ == "SOS":
                     self.root.after(0, lambda: self.log_message("🚨 ¡EMERGENCIA S.O.S DESDE CAJA!", "red"))
+                    self.speak("Atención. Emergencia, emergencia. Se ha activado una alerta desde la caja.")
                 
                 elif type_ == "SAY":
                     msg = j.get("message", "")
                     self.root.after(0, lambda: self.log_message(f"🔊 MENSAJE DE CAJA:\n{msg}", "gold"))
+                    self.speak(msg)
                     
         except Exception:
             pass
