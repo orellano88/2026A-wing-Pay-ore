@@ -62,6 +62,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var tvGranTotal: TextView
     private lateinit var tvCantPagos: TextView
     private lateinit var tvUltimoPago: TextView
+    private lateinit var tvUltimoPagoNombre: TextView
     
     // RecyclerView Historial
     private lateinit var rvPayments: RecyclerView
@@ -140,12 +141,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
 
         buildUI()
-        val rootScroll = ScrollView(this).apply {
-            layoutParams = ViewGroup.LayoutParams(-1, -1)
-            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#0F141C"), Color.parseColor("#080B10"), Color.BLACK))
-            addView(mainLayout)
-        }
-        setContentView(rootScroll)
+        mainLayout.layoutParams = ViewGroup.LayoutParams(-1, -1)
+        setContentView(mainLayout)
         
         // CARGAR HISTORIAL 7 DÍAS CAJA
         loadPaymentsFromStorage()
@@ -250,6 +247,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     else -> {
                         getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
                             .putString("LICENSE_KEY", key).apply()
+                        recreate()
                     }
                 }
             }
@@ -580,7 +578,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 8, 0, 0) }
         }
         val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
-        val lblGran = TextView(this).apply { text = "👑 RECAUDACIÓN DEL DÍA"; textSize = 11f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
+        val lblUltimo = TextView(this).apply { text = "⚡ ÚLTIMO COBRO RECIBIDO"; textSize = 11f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
         val btnExport = Button(this).apply {
             text = "📁 DESCARGAS CSV"
             textSize = 9f
@@ -593,24 +591,53 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             layoutParams = RelativeLayout.LayoutParams(-2, (32 * resources.displayMetrics.density).toInt()).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT) }
             setOnClickListener { exportCierreDeCajaCSV() }
         }
-        headerRow.addView(lblGran)
+        headerRow.addView(lblUltimo)
         headerRow.addView(btnExport)
 
-        tvGranTotal = TextView(this).apply { text = "S/ 0.00"; textSize = 26f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.DEFAULT_BOLD) }
-        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.9f }
-        
-        tvUltimoPago = TextView(this).apply {
-            text = "⚡ ÚLTIMO COBRO: Ninguno aún"
-            textSize = 10f
-            setTextColor(Color.parseColor("#FFD700"))
-            setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
-            setPadding(0, 8, 0, 0)
+        tvUltimoPago = TextView(this).apply { 
+            text = "S/ 0.00"; 
+            textSize = 28f; 
+            setTextColor(Color.parseColor("#FFD700")); 
+            setTypeface(Typeface.DEFAULT_BOLD);
+            setMargins(0, 4, 0, 0)
+        }
+        tvUltimoPagoNombre = TextView(this).apply { 
+            text = "Esperando pagos..."; 
+            textSize = 12f; 
+            setTextColor(Color.WHITE); 
+            alpha = 0.9f 
         }
 
+        val cardRecaudacion = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            padding(12, 10, 12, 10)
+            background = getGlassDrawable(Color.parseColor("#15FFFFFF"), Color.parseColor("#FFD700"))
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 12, 0, 0) }
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val lblRecaudacion = TextView(this).apply { 
+            text = "💰 RECAUDACIÓN DEL DÍA:"; 
+            textSize = 10f; 
+            setTextColor(Color.parseColor("#FFD700")); 
+            setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+        }
+        tvGranTotal = TextView(this).apply { 
+            text = "S/ 0.00"; 
+            textSize = 14f; 
+            setTextColor(Color.WHITE); 
+            setTypeface(Typeface.DEFAULT_BOLD) 
+        }
+        cardRecaudacion.addView(lblRecaudacion)
+        cardRecaudacion.addView(tvGranTotal)
+        
+        tvCantPagos = TextView(this).apply { text = "0 cobro(s) registrados hoy"; textSize = 9f; setTextColor(Color.parseColor("#FFF8DC")); alpha = 0.8f; setMargins(0, 8, 0, 0); gravity = Gravity.CENTER_HORIZONTAL }
+
         cardGranTotal.addView(headerRow)
-        cardGranTotal.addView(tvGranTotal)
-        cardGranTotal.addView(tvCantPagos)
         cardGranTotal.addView(tvUltimoPago)
+        cardGranTotal.addView(tvUltimoPagoNombre)
+        cardGranTotal.addView(cardRecaudacion)
+        cardGranTotal.addView(tvCantPagos)
 
         grid.addView(row1)
         grid.addView(row2)
@@ -634,7 +661,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private fun setupHistoryRecyclerView() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 4, 0, 8) }
+            layoutParams = LinearLayout.LayoutParams(-1, 0, 1f).apply { setMargins(0, 4, 0, 8) }
             background = getGlassDrawable(Color.parseColor("#AA000000"), Color.parseColor("#2200E5FF"))
             padding(12, 10, 12, 10)
         }
@@ -660,8 +687,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         rvPayments = RecyclerView(this).apply {
             layoutManager = LinearLayoutManager(this@MainActivity)
-            layoutParams = LinearLayout.LayoutParams(-1, -2)
-            isNestedScrollingEnabled = false
+            layoutParams = LinearLayout.LayoutParams(-1, -1)
+            isNestedScrollingEnabled = true
         }
         adapter = PaymentAdapter(paymentList)
         rvPayments.adapter = adapter
@@ -773,9 +800,11 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         
         if (todayPayments.isNotEmpty()) {
             val lastPayment = todayPayments.first() // Asumiendo orden descendente
-            tvUltimoPago.text = "⚡ ÚLTIMO: S/ ${lastPayment.amount} de ${lastPayment.name.take(15)}"
+            tvUltimoPago.text = String.format(Locale.US, "S/ %.2f", lastPayment.amount)
+            tvUltimoPagoNombre.text = "de ${lastPayment.name} en ${lastPayment.bank}"
         } else {
-            tvUltimoPago.text = "⚡ ÚLTIMO COBRO: Ninguno aún"
+            tvUltimoPago.text = "S/ 0.00"
+            tvUltimoPagoNombre.text = "Esperando pagos..."
         }
     }
 

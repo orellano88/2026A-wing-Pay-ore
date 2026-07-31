@@ -134,7 +134,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
                 // Si estamos en Modo Compañero y cayó el internet, el paquete UDP local actuará de respaldo
                 if (!isEmisorMode) {
-                    val dedupKey = "UDP|$bank|$name|$amt"
+                    val dedupKey = "REMOTE_SYNC|$bank|$name|$amt"
                     val now = System.currentTimeMillis()
                     if (now - (processedNotifications[dedupKey] ?: 0L) < 5000) return
                     processedNotifications[dedupKey] = now
@@ -190,7 +190,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 val name = j.optString("name", "Cliente")
                 val amt = j.optString("amt", "0.00")
 
-                val dedupKey = "NTFY|$bank|$name|$amt"
+                val dedupKey = "REMOTE_SYNC|$bank|$name|$amt"
                 val now = System.currentTimeMillis()
                 if (now - (processedNotifications[dedupKey] ?: 0L) < 5000) return
                 processedNotifications[dedupKey] = now
@@ -441,8 +441,15 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     KEY_POLICE -> executePoliceProtocol()
                     KEY_TEST -> {
                         speakWithMaxVolumeFocus("WINGPAY SISTEMA FERRETERO ONLINE. ENLACE NATIVO VERIFICADO.")
-                        dispatchHUD("VERIFICACIÓN", "1.00", "WINGPAY", "TEST", false)
-                        syncParallelMultidestino("WINGPAY", "TEST", "1.00", "PRUEBA DE TRANSMISION")
+                        val testName = "VERIFICACION"
+                        val testBank = "TEST"
+                        val testAmt = "1.00"
+                        if (isEmisorMode) {
+                            dispatchHUD(testName, testAmt, testBank, "PRUEBA", false)
+                            syncParallelMultidestino(testBank, testName, testAmt, "PRUEBA DE TRANSMISION")
+                        } else {
+                            dispatchHUD(testName, testAmt, testBank, "PRUEBA", false)
+                        }
                     }
                     KEY_SAY -> {
                         val msg = it.getStringExtra(EXTRA_MESSAGE) ?: ""
