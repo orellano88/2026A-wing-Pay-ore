@@ -287,6 +287,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             // IDENTIFICAR DIRECCIÓN DEL FLUJO (INGRESO vs EGRESO)
             val direction = detectFlowDirection(rawContent)
 
+            // MUTEAR / IGNORAR COMPLETAMENTE EGRESOS (CUANDO TÚ ENVIAS O TRASFIERES DINERO)
+            if (direction == "EGRESO") return
+
             // EXTRACTOR INTELIGENTE DE REMITENTE / DESTINATARIO
             var senderName = ""
             val titleLower = title.lowercase().trim()
