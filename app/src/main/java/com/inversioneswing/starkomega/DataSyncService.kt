@@ -290,24 +290,53 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             // EXTRACTOR INTELIGENTE DE REMITENTE / DESTINATARIO
             var senderName = ""
             val titleLower = title.lowercase().trim()
-            val isGenericTitle = titleLower.isEmpty() || listOf("yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", "notificación", "notificacion", "mensaje").any { titleLower == it || titleLower.startsWith(it) }
+            val isGenericTitle = titleLower.isEmpty() || listOf(
+                "yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", 
+                "notificación", "notificacion", "mensaje", "confirmación", "confirmacion", 
+                "pago", "pago recibido", "pago realizado", "transferencia"
+            ).any { titleLower == it || titleLower.startsWith(it) }
 
             if (!isGenericTitle && title.length in 3..35 && !title.contains("S/", ignoreCase = true)) {
                 senderName = cleanSenderName(title)
             }
             
             if (senderName.isEmpty() || senderName == "Cliente") {
-                val senderPattern = Pattern.compile("(?:de|por|remitente:|a:?|para:?)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)|([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio|recibió|recibio)", Pattern.CASE_INSENSITIVE)
-                val senderMatcher = senderPattern.matcher(rawContent)
-                if (senderMatcher.find()) {
-                    val candidate = senderMatcher.group(1) ?: senderMatcher.group(2)
+                val senderPattern1 = Pattern.compile("(?:de|por|remitente:|de parte de)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})", Pattern.CASE_INSENSITIVE)
+                val senderMatcher1 = senderPattern1.matcher(rawContent)
+                if (senderMatcher1.find()) {
+                    val candidate = senderMatcher1.group(1)
                     if (!candidate.isNullOrBlank()) {
                         senderName = cleanSenderName(candidate.trim())
                     }
                 }
             }
 
-            if (senderName.isBlank()) senderName = "Cliente"
+            if (senderName.isEmpty() || senderName == "Cliente") {
+                val senderPattern2 = Pattern.compile("([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio|recibió|recibio)", Pattern.CASE_INSENSITIVE)
+                val senderMatcher2 = senderPattern2.matcher(rawContent)
+                if (senderMatcher2.find()) {
+                    val candidate = senderMatcher2.group(1)
+                    if (!candidate.isNullOrBlank()) {
+                        senderName = cleanSenderName(candidate.trim())
+                    }
+                }
+            }
+
+            if (senderName.isEmpty() || senderName == "Cliente") {
+                val senderPattern3 = Pattern.compile("(?:a:|para:|yapeaste a|transferiste a|enviaste a)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})", Pattern.CASE_INSENSITIVE)
+                val senderMatcher3 = senderPattern3.matcher(rawContent)
+                if (senderMatcher3.find()) {
+                    val candidate = senderMatcher3.group(1)
+                    if (!candidate.isNullOrBlank()) {
+                        senderName = cleanSenderName(candidate.trim())
+                    }
+                }
+            }
+
+            if (senderName.isBlank() || senderName.lowercase().contains("confirmaci")) {
+                senderName = "Cliente"
+            }
+
             val bankName = identifyBank(pkg, rawContent)
             val currentTimeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
             val spokenTime = formatTimeForSpeech(currentTimeStr)
@@ -448,13 +477,19 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun cleanSenderName(raw: String): String {
-        var clean = raw.replace(Regex("(?i)\\b(yapeaste|yapearon|yapeo|yapeó|recibiste|transferencia|de|por|remitente|pago|enviado|recibido|te envió|te envio|soles|notificación|notificacion|operación|operacion|código|codigo|nro|id|transacción|transaccion|dni|banco|ahorros|corriente|has|un|a|comisión|comision|ventas|exitoso|exitosa|cod|op|ref|vta|yape|plin)\\b"), " ")
+        var clean = raw.replace(Regex("(?i)\\b(confirmación|confirmacion|yapeaste|yapearon|yapeo|yapeó|recibiste|transferencia|transferiste|enviaste|pagaste|de|por|remitente|destinatario|pago|enviado|recibido|te envió|te envio|soles|notificación|notificacion|operación|operacion|código|codigo|nro|id|transacción|transaccion|dni|banco|ahorros|corriente|has|un|a|comisión|comision|ventas|exitoso|exitosa|cod|op|ref|vta|yape|plin|stark|wingpay)\\b"), " ")
         clean = clean.replace(Regex("[^a-zA-ZñÑáéíóúÁÉÍÓÚ\\s]"), "").replace(Regex("\\s+"), " ").trim()
         val words = clean.split(" ").filter { it.length > 1 }
-        return if (words.isNotEmpty()) {
+        val nameRes = if (words.isNotEmpty()) {
             words.take(4).joinToString(" ") { it.lowercase().replaceFirstChar { c -> c.uppercase() } }
         } else {
             "Cliente"
+        }
+        val lowerRes = nameRes.lowercase()
+        return if (lowerRes == "confirmacion" || lowerRes == "confirmación" || lowerRes == "cliente" || lowerRes == "yape" || lowerRes == "plin" || lowerRes == "banco") {
+            "Cliente"
+        } else {
+            nameRes
         }
     }
 
@@ -476,21 +511,22 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             // Emisión 1: Nube NTFY
             try {
                 val url = URL("https://ntfy.sh/$topic")
+                val jsonStr = JSONObject().apply {
+                    put("sender", "EMISOR_APK")
+                    put("type", "PAYMENT_TRANSMISSION")
+                    put("bank", b)
+                    put("name", n)
+                    put("amt", a)
+                    put("message", msg)
+                    put("direction", direction)
+                    put("time", timeStr)
+                }.toString()
+
                 (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    val json = JSONObject().apply {
-                        put("sender", "EMISOR_APK")
-                        put("type", "PAYMENT_TRANSMISSION")
-                        put("bank", b)
-                        put("name", n)
-                        put("amt", a)
-                        put("message", msg)
-                        put("direction", direction)
-                        put("time", timeStr)
-                    }
-                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+                    OutputStreamWriter(outputStream, "UTF-8").use { it.write(jsonStr) }
                     responseCode
                     disconnect()
                 }
@@ -507,7 +543,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     put("amt", a)
                     put("direction", direction)
                     put("time", timeStr)
-                }.toString().toByteArray()
+                }.toString().toByteArray(Charsets.UTF_8)
 
                 val address = InetAddress.getByName("255.255.255.255")
                 val packet = DatagramPacket(payload, payload.size, address, 5005)
@@ -582,16 +618,17 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         serviceScope.launch {
             try {
                 val url = URL("https://ntfy.sh/$topic")
+                val jsonStr = JSONObject().apply {
+                    put("sender", "PHONE")
+                    put("type", "SAY")
+                    put("message", msg)
+                }.toString()
+
                 (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    val json = JSONObject().apply {
-                        put("sender", "PHONE")
-                        put("type", "SAY")
-                        put("message", msg)
-                    }
-                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+                    OutputStreamWriter(outputStream, "UTF-8").use { it.write(jsonStr) }
                     responseCode
                     disconnect()
                 }
@@ -638,12 +675,12 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         serviceScope.launch {
             try {
                 val url = URL("https://ntfy.sh/$topic")
+                val jsonStr = JSONObject().apply { put("sender", "PHONE"); put("type", "SOS") }.toString()
                 (url.openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     doOutput = true
-                    setRequestProperty("Content-Type", "application/json")
-                    val json = JSONObject().apply { put("sender", "PHONE"); put("type", "SOS") }
-                    OutputStreamWriter(outputStream).use { it.write(json.toString()) }
+                    setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+                    OutputStreamWriter(outputStream, "UTF-8").use { it.write(jsonStr) }
                     responseCode
                     disconnect()
                 }
