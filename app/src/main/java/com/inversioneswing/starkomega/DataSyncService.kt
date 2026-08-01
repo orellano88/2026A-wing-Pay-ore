@@ -385,9 +385,16 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     private fun detectFlowDirection(rawContent: String): String {
         val lower = rawContent.lowercase()
+        // Si contiene frases clave de recepción, SIEMPRE es INGRESO
+        val ingresoKeywords = listOf(
+            "te yapeó", "te yapeo", "te plinó", "te plino", "te envió", "te envio", 
+            "recibiste", "abono", "depósito", "deposito", "ingreso", "pago recibido", "de parte de"
+        )
+        if (ingresoKeywords.any { lower.contains(it) }) return "INGRESO"
+
+        // Egresos son únicamente transferencias salientes explícitas del usuario
         val egresoKeywords = listOf(
-            "transferiste", "yapeaste", "plinaste", "enviaste", "pagaste", 
-            "enviado", "salida", "cargo", "descuento de tu cuenta", "diste", "pago realizado"
+            "yapeaste", "plinaste", "transferiste a", "enviaste a", "pagaste a", "retiro"
         )
         return if (egresoKeywords.any { lower.contains(it) }) "EGRESO" else "INGRESO"
     }
