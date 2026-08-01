@@ -22,6 +22,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.*
 import java.util.regex.Pattern
+import java.text.SimpleDateFormat
 
 class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListener {
 
@@ -53,19 +54,23 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         const val KEY_TEST = 5003
         const val KEY_SAY = 5004
 
-        // Lista Negra Anti-Publicidad / Ofertas de Préstamos
+        // Lista Negra Anti-Publicidad / Ofertas de Préstamos / Propaganda
         private val BLACKLIST_TERMS = listOf(
             "solicita tu préstamo", "solicita tu prestamo", "crédito pre-aprobado", "credito pre-aprobado", 
             "crédito preaprobado", "credito preaprobado", "pide tu préstamo", "pide tu prestamo",
             "línea de crédito", "linea de credito", "evaluación crediticia", "evaluacion crediticia",
-            "pide tu credito", "pide tu crédito"
+            "pide tu credito", "pide tu crédito", "préstamo", "prestamo", "promoción", "promocion",
+            "pre-aprobado", "preaprobado", "oferta de crédito", "oferta de credito", "gana un",
+            "sorteo", "descubre tu", "invita y gana", "descuento especial", "pide un préstamo",
+            "pide un prestamo", "solicita un préstamo", "solicita un prestamo", "cuota fija",
+            "simula tu préstamo", "simula tu prestamo"
         )
 
         // Lista Blanca de Validación
         private val WHITELIST_TERMS = listOf(
             "te envió", "te envio", "recibiste", "te yapeó", "te yapeo", "yapearon", "yapeo", "yapeó", "yapeaste",
-            "te plinó", "te plino", "plinaron", "abono", "abonó", "depósito", "deposito", 
-            "confirmación", "confirmacion", "transferencia", "ingreso", "recibido", "pago", "pagó",
+            "te plinó", "te plino", "plinaron", "plinaste", "abono", "abonó", "depósito", "deposito", 
+            "confirmación", "confirmacion", "transferencia", "transferiste", "enviaste", "pagaste", "ingreso", "recibido", "pago", "pagó",
             "yape!", "yape", "plin!", "plin", "bcp", "bbva", "interbank", "scotia", "soles"
         )
     }
@@ -104,7 +109,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     // --------------------------------------------------------------------------------
-    // MEJORA 2: ESCUCHADOR UDP LOCAL 5005 (RESPALDO OFFLINE PARA COMPAÑEROS SIN INTERNET)
+    // ESCUCHADOR UDP LOCAL 5005 (RESPALDO OFFLINE PARA COMPAÑEROS SIN INTERNET)
     // --------------------------------------------------------------------------------
     private fun startUDPListener() {
         udpJob?.cancel()
@@ -134,18 +139,25 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 val bank = j.optString("bank", "PAGO")
                 val name = j.optString("name", "Cliente")
                 val amt = j.optString("amt", "0.00")
+                val direction = j.optString("direction", "INGRESO")
+                val timeStr = j.optString("time", SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()))
 
                 // Si estamos en Modo Compañero y cayó el internet, el paquete UDP local actuará de respaldo
                 if (!isEmisorMode) {
-                    val dedupKey = "REMOTE_SYNC|$bank|$name|$amt"
+                    val dedupKey = "REMOTE_SYNC|$bank|$name|$amt|$direction"
                     val now = System.currentTimeMillis()
                     if (now - (processedNotifications[dedupKey] ?: 0L) < 5000) return
                     processedNotifications[dedupKey] = now
 
                     val spokenAmount = speakAmount(cleanAmountString(amt))
-                    val vocalization = "Confirmado en Caja por Red Local: $bank de $name por $spokenAmount."
+                    val spokenTime = formatTimeForSpeech(timeStr)
+                    val vocalization = if (direction == "EGRESO") {
+                        "Transferencia saliente en $bank a $name por $spokenAmount a las $spokenTime."
+                    } else {
+                        "Confirmado en Caja por Red Local: $bank de $name por $spokenAmount a las $spokenTime."
+                    }
                     speak(vocalization, false)
-                    dispatchHUD(name, amt, bank, vocalization, true)
+                    dispatchHUD(name, amt, bank, vocalization, true, direction, timeStr)
                 }
             }
         } catch (e: Exception) {}
@@ -192,17 +204,24 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 val bank = j.optString("bank", "PAGO")
                 val name = j.optString("name", "Cliente")
                 val amt = j.optString("amt", "0.00")
+                val direction = j.optString("direction", "INGRESO")
+                val timeStr = j.optString("time", SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()))
 
-                val dedupKey = "REMOTE_SYNC|$bank|$name|$amt"
+                val dedupKey = "REMOTE_SYNC|$bank|$name|$amt|$direction"
                 val now = System.currentTimeMillis()
                 if (now - (processedNotifications[dedupKey] ?: 0L) < 5000) return
                 processedNotifications[dedupKey] = now
 
                 val spokenAmount = speakAmount(cleanAmountString(amt))
-                val vocalization = "Confirmado en Caja: $bank de $name por $spokenAmount."
+                val spokenTime = formatTimeForSpeech(timeStr)
+                val vocalization = if (direction == "EGRESO") {
+                    "Egreso confirmado: Transferiste por $bank a $name $spokenAmount a las $spokenTime."
+                } else {
+                    "Confirmado en Caja: $bank de $name por $spokenAmount a las $spokenTime."
+                }
                 speak(vocalization, false)
 
-                dispatchHUD(name, amt, bank, vocalization, true)
+                dispatchHUD(name, amt, bank, vocalization, true, direction, timeStr)
             }
 
         } catch (e: Exception) {}
@@ -227,13 +246,17 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         val lowerContent = rawContent.lowercase()
 
         // --------------------------------------------------------------------------------
+        // REMOCIÓN COMPLETA DE WHATSAPP: Ignorar notificaciones de WhatsApp
+        // --------------------------------------------------------------------------------
+        if (pkg.contains("whatsapp")) return
+
+        // --------------------------------------------------------------------------------
         // FILTROS DE IDENTIFICACIÓN DE APLICACIÓN Y CONTENIDO DE PAGO
         // --------------------------------------------------------------------------------
         val validPackages = listOf(
             "com.bcp.bank.yape", "com.bcp.bank.bcap", 
             "com.bbva.netcash", "com.bbva.mobile",
             "com.interbank.mobilebanking", "com.scotiabank.peru",
-            "com.whatsapp", "com.whatsapp.w4b",
             "com.google.android.apps.messaging", "com.samsung.android.messaging",
             "com.android.mms", "com.android.messaging"
         )
@@ -244,9 +267,10 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
         if (!isTargetPkg && !containsPaymentKeyword) return
 
-        // FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS
-        val hasBlacklist = BLACKLIST_TERMS.any { lowerContent.contains(it) }
-        if (hasBlacklist) return
+        // --------------------------------------------------------------------------------
+        // FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS (PROPAGANDA / PUBLICIDAD NO LECTURAR)
+        // --------------------------------------------------------------------------------
+        if (isPropagandaOrLoan(rawContent)) return
 
         val hasWhitelist = WHITELIST_TERMS.any { lowerContent.contains(it) } || rawContent.contains("S/", ignoreCase = true) || rawContent.contains("soles", ignoreCase = true)
         if (!hasWhitelist) return
@@ -260,17 +284,20 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             val cleanedAmount = cleanAmountString(rawAmountStr)
             if (cleanedAmount == "0" || cleanedAmount.isEmpty()) return
 
-            // EXTRACTOR INTELIGENTE DE REMITENTE
+            // IDENTIFICAR DIRECCIÓN DEL FLUJO (INGRESO vs EGRESO)
+            val direction = detectFlowDirection(rawContent)
+
+            // EXTRACTOR INTELIGENTE DE REMITENTE / DESTINATARIO
             var senderName = ""
             val titleLower = title.lowercase().trim()
-            val isGenericTitle = titleLower.isEmpty() || listOf("yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", "notificación", "notificacion", "mensaje", "whatsapp").any { titleLower == it || titleLower.startsWith(it) }
+            val isGenericTitle = titleLower.isEmpty() || listOf("yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", "notificación", "notificacion", "mensaje").any { titleLower == it || titleLower.startsWith(it) }
 
             if (!isGenericTitle && title.length in 3..35 && !title.contains("S/", ignoreCase = true)) {
                 senderName = cleanSenderName(title)
             }
             
             if (senderName.isEmpty() || senderName == "Cliente") {
-                val senderPattern = Pattern.compile("(?:de|por|remitente:)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)|([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio)", Pattern.CASE_INSENSITIVE)
+                val senderPattern = Pattern.compile("(?:de|por|remitente:|a:?|para:?)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)|([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]+)\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio|recibió|recibio)", Pattern.CASE_INSENSITIVE)
                 val senderMatcher = senderPattern.matcher(rawContent)
                 if (senderMatcher.find()) {
                     val candidate = senderMatcher.group(1) ?: senderMatcher.group(2)
@@ -282,26 +309,74 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
             if (senderName.isBlank()) senderName = "Cliente"
             val bankName = identifyBank(pkg, rawContent)
+            val currentTimeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+            val spokenTime = formatTimeForSpeech(currentTimeStr)
 
             // DEDUPLICACIÓN EN EMISOR (Ventana de 4 segundos)
-            val dedupKey = "EMISOR|$bankName|$senderName|$cleanedAmount"
+            val dedupKey = "EMISOR|$bankName|$senderName|$cleanedAmount|$direction"
             val now = System.currentTimeMillis()
             val lastSeen = processedNotifications[dedupKey] ?: 0L
             if (now - lastSeen < 4000) return
             processedNotifications[dedupKey] = now
 
             val spokenAmount = speakAmount(cleanedAmount)
-            val speechText = "Depósito de $senderName por $spokenAmount en $bankName."
+            val speechText = if (direction == "EGRESO") {
+                "Transferiste por $bankName a $senderName $spokenAmount a las $spokenTime."
+            } else {
+                "Recibiste $bankName de $senderName por $spokenAmount a las $spokenTime."
+            }
             
             // VOCALIZACIÓN CON AUDIOFOCUS & FORZADO DE VOLUMEN FERRETERO
             speakWithMaxVolumeFocus(speechText)
 
-            dispatchHUD(senderName, cleanedAmount, bankName, speechText, false)
+            dispatchHUD(senderName, cleanedAmount, bankName, speechText, false, direction, currentTimeStr)
 
             // TRANSMISIÓN PARALELA (NTFY + UDP 5005)
-            syncParallelMultidestino(bankName, senderName, cleanedAmount, speechText)
+            syncParallelMultidestino(bankName, senderName, cleanedAmount, speechText, direction, currentTimeStr)
         }
     }
+
+    private fun isPropagandaOrLoan(rawContent: String): Boolean {
+        val lower = rawContent.lowercase()
+        val hasBlacklist = BLACKLIST_TERMS.any { lower.contains(it) }
+        if (hasBlacklist) return true
+        
+        // Verificación adicional para créditos y préstamos publicitarios
+        if ((lower.contains("crédito") || lower.contains("credito")) && 
+            !lower.contains("telecrédito") && !lower.contains("telecredito")) {
+            if (listOf("pide", "solicita", "aprobado", "línea", "linea", "tarjeta", "evaluación", "evaluacion", "tienes un").any { lower.contains(it) }) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun detectFlowDirection(rawContent: String): String {
+        val lower = rawContent.lowercase()
+        val egresoKeywords = listOf(
+            "transferiste", "yapeaste", "plinaste", "enviaste", "pagaste", 
+            "enviado", "salida", "cargo", "descuento de tu cuenta", "diste", "pago realizado"
+        )
+        return if (egresoKeywords.any { lower.contains(it) }) "EGRESO" else "INGRESO"
+    }
+
+    private fun formatTimeForSpeech(timeStr: String): String {
+        return try {
+            val parts = timeStr.split(":")
+            if (parts.size >= 2) {
+                val h = parts[0].toIntOrNull() ?: 0
+                val m = parts[1].toIntOrNull() ?: 0
+                val h12 = if (h == 0) 12 else if (h > 12) h - 12 else h
+                val minStr = if (m == 0) "en punto" else if (m < 10) "cero $m" else "$m"
+                "$h12 y $minStr"
+            } else {
+                timeStr
+            }
+        } catch (e: Exception) {
+            timeStr
+        }
+    }
+
 
     // --------------------------------------------------------------------------------
     // MEJORA 3: CONTROL DE VOLUMEN FORZADO CON AUDIOFOCUS PARA LOCATORIOS FERRETEROS
@@ -390,11 +465,13 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         pkg.contains("bbva") -> "BBVA"
         pkg.contains("interbank") -> "Interbank"
         pkg.contains("scotia") -> "Scotiabank"
-        pkg.contains("whatsapp") -> "WhatsApp"
+        pkg.contains("tunki") -> "Tunki"
+        pkg.contains("bim") -> "BIM"
+        pkg.contains("agora") -> "Agora"
         else -> "Banco"
     }
 
-    private fun syncParallelMultidestino(b: String, n: String, a: String, msg: String) {
+    private fun syncParallelMultidestino(b: String, n: String, a: String, msg: String, direction: String = "INGRESO", timeStr: String = "") {
         serviceScope.launch {
             // Emisión 1: Nube NTFY
             try {
@@ -410,6 +487,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                         put("name", n)
                         put("amt", a)
                         put("message", msg)
+                        put("direction", direction)
+                        put("time", timeStr)
                     }
                     OutputStreamWriter(outputStream).use { it.write(json.toString()) }
                     responseCode
@@ -426,6 +505,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     put("bank", b)
                     put("name", n)
                     put("amt", a)
+                    put("direction", direction)
+                    put("time", timeStr)
                 }.toString().toByteArray()
 
                 val address = InetAddress.getByName("255.255.255.255")
@@ -442,7 +523,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         }
     }
 
-    private fun dispatchHUD(n: String, a: String, b: String, msg: String, isRemote: Boolean) {
+    private fun dispatchHUD(n: String, a: String, b: String, msg: String, isRemote: Boolean, direction: String = "INGRESO", timeStr: String = "") {
         sendBroadcast(Intent("STARK_HUD_UPDATE").apply {
             setPackage(packageName)
             putExtra("NAME", n)
@@ -450,6 +531,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             putExtra("BANK", b)
             putExtra("MSG", msg)
             putExtra("IS_REMOTE", isRemote)
+            putExtra("DIRECTION", direction)
+            putExtra("TIME", timeStr)
         })
     }
 

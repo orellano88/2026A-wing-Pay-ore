@@ -89,13 +89,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val name = it.getStringExtra("NAME") ?: "Anónimo"
                 val amtStr = it.getStringExtra("AMT") ?: "0.00"
                 val bank = it.getStringExtra("BANK") ?: "PAGO"
-                val rawMsg = it.getStringExtra("MSG") ?: ""
                 val isRemote = it.getBooleanExtra("IS_REMOTE", false)
+                val direction = it.getStringExtra("DIRECTION") ?: "INGRESO"
                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-                val timeStr = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+                val timeExtra = it.getStringExtra("TIME") ?: ""
+                val timeStr = if (timeExtra.isNotEmpty()) timeExtra else SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
 
                 val amtVal = amtStr.toDoubleOrNull() ?: 0.0
-                val item = PaymentItem(bank, name, amtVal, timeStr, dateStr)
+                val item = PaymentItem(bank, name, amtVal, timeStr, dateStr, direction)
                 
                 runOnUiThread {
                     adapter.addPayment(item)
@@ -103,7 +104,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
                     
                     if (!isEmisorMode && isRemote) {
-                        showCompaneroPopup(bank, name, amtStr)
+                        showCompaneroPopup(bank, name, amtStr, direction)
                     }
                 }
             }
@@ -336,6 +337,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         put("amount", p.amount)
                         put("time", p.time)
                         put("date", p.date)
+                        put("direction", p.direction)
                     }
                     jsonArray.put(obj)
                 }
@@ -358,12 +360,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val itemDate = obj.optString("date", todayStr)
+                val dir = obj.optString("direction", "INGRESO")
                 paymentList.add(PaymentItem(
                     obj.getString("bank"),
                     obj.getString("name"),
                     obj.getDouble("amount"),
                     obj.getString("time"),
-                    itemDate
+                    itemDate,
+                    dir
                 ))
             }
             adapter.notifyDataSetChanged()
@@ -834,38 +838,46 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         var totalPlin = 0.0
         var totalBcp = 0.0
         var totalOtros = 0.0
+        var totalEgresos = 0.0
 
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
         val todayPayments = paymentList.filter { it.date == todayStr }
 
         for (p in todayPayments) {
-            when (p.bank.uppercase()) {
-                "YAPE" -> totalYape += p.amount
-                "PLIN" -> totalPlin += p.amount
-                "BCP", "BCP DIRECTO" -> totalBcp += p.amount
-                else -> totalOtros += p.amount
+            if (p.direction.uppercase() == "EGRESO") {
+                totalEgresos += p.amount
+            } else {
+                when (p.bank.uppercase()) {
+                    "YAPE" -> totalYape += p.amount
+                    "PLIN" -> totalPlin += p.amount
+                    "BCP", "BCP DIRECTO" -> totalBcp += p.amount
+                    else -> totalOtros += p.amount
+                }
             }
         }
 
-        val granTotal = totalYape + totalPlin + totalBcp + totalOtros
+        val granTotal = (totalYape + totalPlin + totalBcp + totalOtros) - totalEgresos
         tvTotalYape.text = String.format(Locale.US, "S/ %.2f", totalYape)
         tvTotalPlin.text = String.format(Locale.US, "S/ %.2f", totalPlin)
         tvTotalBcp.text = String.format(Locale.US, "S/ %.2f", totalBcp)
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
-        tvCantPagos.text = "${todayPayments.size} cobro(s) registrados hoy (${paymentList.size} en 7 días)"
+        tvCantPagos.text = "${todayPayments.size} mov. hoy (${paymentList.size} en 7 días) • Egresos: -S/ ${String.format(Locale.US, "%.2f", totalEgresos)}"
         
         if (todayPayments.isNotEmpty()) {
-            val lastPayment = todayPayments.first() // Asumiendo orden descendente
-            tvUltimoPago.text = String.format(Locale.US, "S/ %.2f", lastPayment.amount)
-            tvUltimoPagoNombre.text = "de ${lastPayment.name} en ${lastPayment.bank}"
+            val lastPayment = todayPayments.first()
+            val isEgreso = lastPayment.direction.uppercase() == "EGRESO"
+            val dirPrefix = if (isEgreso) "🔴 Transferiste a" else "🟢 Recibiste de"
+            tvUltimoPago.text = String.format(Locale.US, "%sS/ %.2f", if (isEgreso) "-" else "", lastPayment.amount)
+            tvUltimoPagoNombre.text = "$dirPrefix ${lastPayment.name} en ${lastPayment.bank} (${lastPayment.time})"
         } else {
             tvUltimoPago.text = "S/ 0.00"
             tvUltimoPagoNombre.text = "Esperando pagos..."
         }
     }
 
-    private fun showCompaneroPopup(bank: String, name: String, amount: String) {
+    private fun showCompaneroPopup(bank: String, name: String, amount: String, direction: String = "INGRESO") {
+        val isEgreso = direction.uppercase() == "EGRESO"
         val popupView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -873,27 +885,27 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#F20F141C"))
                 cornerRadius = 30f
-                setStroke(4, Color.parseColor("#00E5FF"))
+                setStroke(4, Color.parseColor(if (isEgreso) "#FF4444" else "#00E5FF"))
             }
         }
 
         val title = TextView(this).apply {
-            text = "⚡ COBRO FERRETERO CONFIRMADO"
+            text = if (isEgreso) "🔴 EGRESO FERRETERO REGISTRADO" else "⚡ COBRO FERRETERO CONFIRMADO"
             textSize = 13f
-            setTextColor(Color.parseColor("#00E5FF"))
+            setTextColor(Color.parseColor(if (isEgreso) "#FF4444" else "#00E5FF"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         }
         val sub = TextView(this).apply {
-            text = "$bank • S/ $amount"
+            text = "$bank • ${if (isEgreso) "-S/ " else "S/ "}$amount"
             textSize = 26f
             setTextColor(Color.WHITE)
             setTypeface(Typeface.DEFAULT_BOLD)
             setMargins(0, 8, 0, 4)
         }
         val client = TextView(this).apply {
-            text = "Cliente: $name"
+            text = if (isEgreso) "Destinatario: $name" else "Cliente: $name"
             textSize = 15f
-            setTextColor(Color.parseColor("#2ECC71"))
+            setTextColor(Color.parseColor(if (isEgreso) "#FF6B6B" else "#2ECC71"))
         }
 
         popupView.addView(title)
@@ -1210,7 +1222,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 // --------------------------------------------------------------------------------
 // ADAPTER HISTORIAL (RECYCLERVIEW) CON SOPORTE PARA FECHAS Y 7 DÍAS
 // --------------------------------------------------------------------------------
-data class PaymentItem(val bank: String, val name: String, val amount: Double, val time: String, val date: String = "")
+data class PaymentItem(
+    val bank: String, 
+    val name: String, 
+    val amount: Double, 
+    val time: String, 
+    val date: String = "", 
+    val direction: String = "INGRESO"
+)
 
 class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView.Adapter<PaymentAdapter.ViewHolder>() {
     class ViewHolder(val view: LinearLayout, val tvBank: TextView, val tvName: TextView, val tvAmt: TextView, val tvTime: TextView) : RecyclerView.ViewHolder(view)
@@ -1244,19 +1263,28 @@ class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
         val item = items[position]
-        holder.tvBank.text = item.bank
-        holder.tvName.text = item.name
-        holder.tvTime.text = if (item.date.isNotEmpty()) "${item.date} ${item.time}" else item.time
-        holder.tvAmt.text = String.format(Locale.US, "S/ %.2f", item.amount)
+        val isEgreso = item.direction.uppercase() == "EGRESO"
 
-        val colorHex = when (item.bank.uppercase()) {
-            "YAPE" -> "#FF007F"
-            "PLIN" -> "#00E5FF"
-            "BCP", "BCP DIRECTO" -> "#FFC107"
-            else -> "#2ECC71"
+        holder.tvBank.text = if (isEgreso) "🔴 EGRESO\n${item.bank}" else "🟢 INGRESO\n${item.bank}"
+        holder.tvName.text = if (isEgreso) "A: ${item.name}" else "De: ${item.name}"
+        holder.tvTime.text = if (item.date.isNotEmpty()) "${item.date} ${item.time}" else item.time
+        
+        val prefix = if (isEgreso) "-S/ " else "S/ "
+        holder.tvAmt.text = String.format(Locale.US, "%s%.2f", prefix, item.amount)
+
+        if (isEgreso) {
+            holder.tvBank.setTextColor(Color.parseColor("#FF4444"))
+            holder.tvAmt.setTextColor(Color.parseColor("#FF4444"))
+        } else {
+            val colorHex = when (item.bank.uppercase()) {
+                "YAPE" -> "#FF007F"
+                "PLIN" -> "#00E5FF"
+                "BCP", "BCP DIRECTO" -> "#FFC107"
+                else -> "#2ECC71"
+            }
+            holder.tvBank.setTextColor(Color.parseColor(colorHex))
+            holder.tvAmt.setTextColor(Color.parseColor(colorHex))
         }
-        holder.tvBank.setTextColor(Color.parseColor(colorHex))
-        holder.tvAmt.setTextColor(Color.parseColor(colorHex))
     }
 
     override fun getItemCount() = items.size
