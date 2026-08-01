@@ -1298,11 +1298,23 @@ class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView
         val item = items[position]
         val isEgreso = item.direction.uppercase() == "EGRESO"
 
-        holder.tvBank.text = if (isEgreso) "🔴 EGRESO\n${item.bank}" else "🟢 INGRESO\n${item.bank}"
-        holder.tvName.text = if (isEgreso) "A: ${item.name}" else "De: ${item.name}"
-        holder.tvTime.text = if (item.date.isNotEmpty()) "${item.date} ${item.time}" else item.time
+        val bankTag = when (item.bank.uppercase()) {
+            "YAPE" -> "🟣 YAPE"
+            "PLIN" -> "🔵 PLIN"
+            "BCP", "BCP DIRECTO" -> "🟠 BCP"
+            "BBVA" -> "🟢 BBVA"
+            "INTERBANK" -> "🔵 INTERBANK"
+            else -> "🟢 ${item.bank}"
+        }
+
+        holder.tvBank.text = bankTag
+        holder.tvName.text = if (isEgreso) "🔴 Para: ${item.name.uppercase()}" else "👤 De: ${item.name.uppercase()}"
         
-        val prefix = if (isEgreso) "-S/ " else "S/ "
+        val actionText = if (isEgreso) "Transferiste por ${item.bank}" else "Recibiste ${item.bank}"
+        val timeFull = if (item.date.isNotEmpty()) "${item.date} a las ${item.time}" else "a las ${item.time}"
+        holder.tvTime.text = "$actionText $timeFull"
+        
+        val prefix = if (isEgreso) "-S/ " else "+S/ "
         holder.tvAmt.text = String.format(Locale.US, "%s%.2f", prefix, item.amount)
 
         if (isEgreso) {
@@ -1313,6 +1325,8 @@ class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView
                 "YAPE" -> "#FF007F"
                 "PLIN" -> "#00E5FF"
                 "BCP", "BCP DIRECTO" -> "#FFC107"
+                "BBVA" -> "#00E676"
+                "INTERBANK" -> "#00B0FF"
                 else -> "#2ECC71"
             }
             holder.tvBank.setTextColor(Color.parseColor(colorHex))
