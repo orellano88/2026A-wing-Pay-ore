@@ -19,10 +19,16 @@ android {
 
     signingConfigs {
         release {
-            storeFile file("../wingpay.keystore")
-            storePassword "123456"
-            keyAlias "wing_alias"
-            keyPassword "123456"
+            storeFile file("../wingpay.jks")
+            storePassword "wingpay2026"
+            keyAlias "wingpay"
+            keyPassword "wingpay2026"
+        }
+        debug {
+            storeFile file("../wingpay.jks")
+            storePassword "wingpay2026"
+            keyAlias "wingpay"
+            keyPassword "wingpay2026"
         }
     }
 
@@ -31,6 +37,10 @@ android {
             signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
         }
     }
     compileOptions {

@@ -79,7 +79,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
         super.onCreate()
         inst = this
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "stark:omega_v73")
+        lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wingpay:service_lock")
         if (!lock.isHeld) lock.acquire()
         
         tts = TextToSpeech(this, this)
