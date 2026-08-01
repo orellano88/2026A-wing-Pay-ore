@@ -89,7 +89,6 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 val name = it.getStringExtra("NAME") ?: "Anónimo"
                 val amtStr = it.getStringExtra("AMT") ?: "0.00"
                 val bank = it.getStringExtra("BANK") ?: "PAGO"
-                val isRemote = it.getBooleanExtra("IS_REMOTE", false)
                 val direction = it.getStringExtra("DIRECTION") ?: "INGRESO"
                 val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
                 val timeExtra = it.getStringExtra("TIME") ?: ""
@@ -103,9 +102,8 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                     updateTotals()
                     savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
                     
-                    if (!isEmisorMode && isRemote) {
-                        showCompaneroPopup(bank, name, amtStr, direction)
-                    }
+                    // MOSTRAR POPUP VISUAL GIGANTE EN PANTALLA SIEMPRE QUE LLEGUE UN PAGO
+                    showIncomingPaymentPopup(bank, name, amtStr, timeStr)
                 }
             }
         }
@@ -862,22 +860,36 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         tvTotalBcp.text = String.format(Locale.US, "S/ %.2f", totalBcp)
         tvTotalOtros.text = String.format(Locale.US, "S/ %.2f", totalOtros)
         tvGranTotal.text = String.format(Locale.US, "S/ %.2f", granTotal)
-        tvCantPagos.text = "${todayPayments.size} mov. hoy (${paymentList.size} en 7 días) • Egresos: -S/ ${String.format(Locale.US, "%.2f", totalEgresos)}"
+        tvCantPagos.text = "${todayPayments.size} pago(s) hoy (${paymentList.size} en 7 días)"
         
         if (todayPayments.isNotEmpty()) {
             val lastPayment = todayPayments.first()
-            val isEgreso = lastPayment.direction.uppercase() == "EGRESO"
-            val dirPrefix = if (isEgreso) "🔴 Transferiste a" else "🟢 Recibiste de"
-            tvUltimoPago.text = String.format(Locale.US, "%sS/ %.2f", if (isEgreso) "-" else "", lastPayment.amount)
-            tvUltimoPagoNombre.text = "$dirPrefix ${lastPayment.name} en ${lastPayment.bank} (${lastPayment.time})"
+            tvUltimoPago.text = String.format(Locale.US, "S/ %.2f", lastPayment.amount)
+            val bankBadge = when (lastPayment.bank.uppercase()) {
+                "YAPE" -> "🟣 YAPE"
+                "PLIN" -> "🔵 PLIN"
+                "BCP", "BCP DIRECTO" -> "🟠 BCP"
+                "BBVA" -> "🟢 BBVA"
+                "INTERBANK" -> "🔵 INTERBANK"
+                else -> "🟢 ${lastPayment.bank}"
+            }
+            tvUltimoPagoNombre.text = "👤 ${lastPayment.name.uppercase()}  •  $bankBadge  •  ⏰ ${lastPayment.time}"
         } else {
             tvUltimoPago.text = "S/ 0.00"
             tvUltimoPagoNombre.text = "Esperando pagos..."
         }
     }
 
-    private fun showCompaneroPopup(bank: String, name: String, amount: String, direction: String = "INGRESO") {
-        val isEgreso = direction.uppercase() == "EGRESO"
+    private fun showIncomingPaymentPopup(bank: String, name: String, amount: String, time: String) {
+        val bankColorHex = when (bank.uppercase()) {
+            "YAPE" -> "#FF007F"
+            "PLIN" -> "#00E5FF"
+            "BCP", "BCP DIRECTO" -> "#FFC107"
+            "BBVA" -> "#00E676"
+            "INTERBANK" -> "#00B0FF"
+            else -> "#2ECC71"
+        }
+
         val popupView = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -885,41 +897,62 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#F20F141C"))
                 cornerRadius = 30f
-                setStroke(4, Color.parseColor(if (isEgreso) "#FF4444" else "#00E5FF"))
+                setStroke(5, Color.parseColor(bankColorHex))
             }
         }
 
         val title = TextView(this).apply {
-            text = if (isEgreso) "🔴 EGRESO FERRETERO REGISTRADO" else "⚡ COBRO FERRETERO CONFIRMADO"
-            textSize = 13f
-            setTextColor(Color.parseColor(if (isEgreso) "#FF4444" else "#00E5FF"))
+            text = "⚡ ¡NUEVO PAGO RECIBIDO!"
+            textSize = 14f
+            setTextColor(Color.parseColor("#FFD700"))
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
         }
+
+        val bankTag = TextView(this).apply {
+            text = "BANCO: ${bank.uppercase()}"
+            textSize = 16f
+            setTextColor(Color.parseColor(bankColorHex))
+            setTypeface(Typeface.DEFAULT_BOLD)
+            setMargins(0, 6, 0, 4)
+        }
+
         val sub = TextView(this).apply {
-            text = "$bank • ${if (isEgreso) "-S/ " else "S/ "}$amount"
-            textSize = 26f
+            text = "S/ $amount"
+            textSize = 34f
             setTextColor(Color.WHITE)
             setTypeface(Typeface.DEFAULT_BOLD)
-            setMargins(0, 8, 0, 4)
+            setMargins(0, 4, 0, 4)
         }
+
         val client = TextView(this).apply {
-            text = if (isEgreso) "Destinatario: $name" else "Cliente: $name"
-            textSize = 15f
-            setTextColor(Color.parseColor(if (isEgreso) "#FF6B6B" else "#2ECC71"))
+            text = "👤 DE: ${name.uppercase()}"
+            textSize = 18f
+            setTextColor(Color.parseColor("#2ECC71"))
+            setTypeface(null, Typeface.BOLD)
+        }
+
+        val timeText = TextView(this).apply {
+            text = "⏰ HORA: $time"
+            textSize = 12f
+            setTextColor(Color.parseColor("#FFF8DC"))
+            alpha = 0.8f
+            setMargins(0, 6, 0, 0)
         }
 
         popupView.addView(title)
+        popupView.addView(bankTag)
         popupView.addView(sub)
         popupView.addView(client)
+        popupView.addView(timeText)
 
         popupWindow?.dismiss()
-        popupWindow = PopupWindow(popupView, (300 * resources.displayMetrics.density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
+        popupWindow = PopupWindow(popupView, (320 * resources.displayMetrics.density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
             animationStyle = android.R.style.Animation_Dialog
             showAtLocation(mainLayout, Gravity.CENTER, 0, 0)
         }
 
         mainScope.launch {
-            delay(5000)
+            delay(6000)
             popupWindow?.dismiss()
         }
     }
