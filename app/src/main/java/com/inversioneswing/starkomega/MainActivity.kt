@@ -1265,33 +1265,35 @@ data class PaymentItem(
 )
 
 class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView.Adapter<PaymentAdapter.ViewHolder>() {
-    class ViewHolder(val view: LinearLayout, val tvBank: TextView, val tvName: TextView, val tvAmt: TextView, val tvTime: TextView) : RecyclerView.ViewHolder(view)
+    class ViewHolder(val view: LinearLayout, val tvBank: TextView, val tvName: TextView, val tvAmt: TextView) : RecyclerView.ViewHolder(view)
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
         val ctx = parent.context
         val container = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(15, 12, 15, 12)
-            layoutParams = RecyclerView.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 8) }
+            setPadding(12, 8, 12, 8)
+            layoutParams = RecyclerView.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 4) }
             background = GradientDrawable().apply {
                 setColor(Color.parseColor("#15FFFFFF"))
-                cornerRadius = 14f
+                cornerRadius = 10f
             }
         }
-        val tvBank = TextView(ctx).apply { textSize = 10f; setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setPadding(0,0,15,0) }
-        val infoLayout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }
-        val tvName = TextView(ctx).apply { textSize = 12f; setTextColor(Color.WHITE); setTypeface(Typeface.DEFAULT_BOLD) }
-        val tvTime = TextView(ctx).apply { textSize = 9f; setTextColor(Color.WHITE); alpha = 0.6f }
-        infoLayout.addView(tvName); infoLayout.addView(tvTime)
-
-        val tvAmt = TextView(ctx).apply { textSize = 14f; setTypeface(Typeface.DEFAULT_BOLD) }
+        val tvBank = TextView(ctx).apply { textSize = 11f; setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setPadding(0, 0, 10, 0) }
+        val tvName = TextView(ctx).apply { 
+            textSize = 12f 
+            setTextColor(Color.WHITE) 
+            setTypeface(Typeface.DEFAULT_BOLD) 
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
+            maxLines = 1
+        }
+        val tvAmt = TextView(ctx).apply { textSize = 13f; setTypeface(Typeface.DEFAULT_BOLD) }
 
         container.addView(tvBank)
-        container.addView(infoLayout)
+        container.addView(tvName)
         container.addView(tvAmt)
 
-        return ViewHolder(container, tvBank, tvName, tvAmt, tvTime)
+        return ViewHolder(container, tvBank, tvName, tvAmt)
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
@@ -1308,11 +1310,8 @@ class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView
         }
 
         holder.tvBank.text = bankTag
-        holder.tvName.text = if (isEgreso) "🔴 Para: ${item.name.uppercase()}" else "👤 De: ${item.name.uppercase()}"
-        
-        val actionText = if (isEgreso) "Transferiste por ${item.bank}" else "Recibiste ${item.bank}"
-        val timeFull = if (item.date.isNotEmpty()) "${item.date} a las ${item.time}" else "a las ${item.time}"
-        holder.tvTime.text = "$actionText $timeFull"
+        val prefixName = if (isEgreso) "🔴 Para:" else "👤 De:"
+        holder.tvName.text = "$prefixName ${item.name.uppercase()} • ${item.time}"
         
         val prefix = if (isEgreso) "-S/ " else "+S/ "
         holder.tvAmt.text = String.format(Locale.US, "%s%.2f", prefix, item.amount)
