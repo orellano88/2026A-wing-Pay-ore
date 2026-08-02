@@ -1311,10 +1311,11 @@ class PaymentAdapter(private val items: MutableList<PaymentItem>) : RecyclerView
 
         holder.tvBank.text = bankTag
         val prefixName = if (isEgreso) "🔴 Para:" else "👤 De:"
-        holder.tvName.text = "$prefixName ${item.name.uppercase()} • ${item.time}"
+        holder.tvName.text = "$prefixName ${item.name.uppercase()}"
         
-        val prefix = if (isEgreso) "-S/ " else "+S/ "
-        holder.tvAmt.text = String.format(Locale.US, "%s%.2f", prefix, item.amount)
+        val prefix = if (isEgreso) "-S/ " else "S/ "
+        val formattedAmt = String.format(Locale.US, "%s%.2f", prefix, item.amount)
+        holder.tvAmt.text = "$formattedAmt • ${item.time}"
 
         if (isEgreso) {
             holder.tvBank.setTextColor(Color.parseColor("#FF4444"))
