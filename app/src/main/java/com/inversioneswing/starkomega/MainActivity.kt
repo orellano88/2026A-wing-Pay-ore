@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // UIs
     private lateinit var mainLayout: LinearLayout
     private lateinit var modeRadioGroup: RadioGroup
+    private var ttsIndicatorLED: View? = null
     private lateinit var rbEmisor: RadioButton
     private lateinit var rbCompanero: RadioButton
     private lateinit var btnActionQR: Button
@@ -69,6 +70,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private lateinit var rvPayments: RecyclerView
     private lateinit var adapter: PaymentAdapter
     private val paymentList = mutableListOf<PaymentItem>()
+    private val todayPaymentsList = mutableListOf<PaymentItem>()
     
     // Popup Receptor (Modo Compañero)
     private var popupWindow: PopupWindow? = null
@@ -82,6 +84,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     private var accelerometer: Sensor? = null
     
     private val mainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var welcomeSpoken = false
 
     private val hudReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -96,14 +99,26 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
                 val amtVal = amtStr.toDoubleOrNull() ?: 0.0
                 val item = PaymentItem(bank, name, amtVal, timeStr, dateStr, direction)
-                
                 runOnUiThread {
-                    adapter.addPayment(item)
-                    updateTotals()
-                    savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
-                    
-                    // MOSTRAR POPUP VISUAL GIGANTE EN PANTALLA SIEMPRE QUE LLEGUE UN PAGO
-                    showIncomingPaymentPopup(bank, name, amtStr, timeStr)
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    try {
+                        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+                        val lastOpened = prefs.getString("LAST_OPENED_DATE", "")
+                        if (!lastOpened.isNullOrEmpty() && lastOpened != dateStr) {
+                            loadPaymentsFromStorage()
+                        }
+
+                        adapter.addPayment(item)
+                        paymentList.add(0, item)
+                        if (dateStr != todayPaymentsList.firstOrNull()?.date && todayPaymentsList.isNotEmpty()) {
+                            // Día cambió, la lista todayPaymentsList ya fue limpiada por loadPaymentsFromStorage
+                        }
+                        updateTotals()
+                        savePaymentsToStorage() // PERSISTENCIA DE 7 DÍAS CON CARPETA DOWNLOADS
+                        
+                        // MOSTRAR POPUP VISUAL GIGANTE EN PANTALLA SIEMPRE QUE LLEGUE UN PAGO
+                        showIncomingPaymentPopup(bank, name, amtStr, timeStr)
+                    } catch (e: Exception) {}
                 }
             }
         }
@@ -168,87 +183,74 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         
         if (key.isEmpty() || name.isEmpty()) {
             showLicenseActivationDialog(
-                "👑 ACTIVACIÓN IMPORTACIONES WING GOLD", 
-                "Para obtener su clave de licencia contacte a Importaciones Wing al WhatsApp 921665833."
+                "ACTIVACIÓN INVERSIONES WING PREMIUM", 
+                "Ingrese sus datos para activar el sistema. Si no cuenta con una licencia, contacte al soporte técnico."
             )
         } else {
-            verifyLicenseWithGoogleSheet(key)
+            verifyLicenseWithGoogleSheet(key, name)
         }
     }
 
-    private fun verifyLicenseWithGoogleSheet(key: String, isManualUpdate: Boolean = false) {
+    private fun verifyLicenseWithGoogleSheet(key: String, name: String, isManualUpdate: Boolean = false) {
         val currentDeviceId = getHardwareDeviceId()
         mainScope.launch(Dispatchers.IO) {
             var status = "OFFLINE_OK"
-            var expStr = ""
             try {
-                val csvUrl = "https://docs.google.com/spreadsheets/d/1N7OgRlXECNBUwFWBaVTBl_b1t_aiLegdGRj_9gHMXXY/gviz/tq?tqx=out:csv"
-                val urlObj = java.net.URL(csvUrl)
-                val conn = (urlObj.openConnection() as java.net.HttpURLConnection).apply {
-                    connectTimeout = 6000
-                    readTimeout = 6000
-                }
+                val scriptUrl = "https://script.google.com/macros/s/AKfycbyKeJw96jrjZuavudsHLmY_C8zjcjqM8to78u-G_3TBZcc9iKg_R2aNTEdMZBQlXbaQtg/exec"
+                val encodedKey = Uri.encode(key)
+                val encodedName = Uri.encode(name)
+                val encodedDevId = Uri.encode(currentDeviceId)
+                val fullUrl = "$scriptUrl?codigo=$encodedKey&nombre=$encodedName&id_equipo=$encodedDevId"
                 
-                val lines = conn.inputStream.bufferedReader().readLines()
-                var keyFound = false
-                var isExpired = false
-                var isDeviceBlocked = false
-
-                for (line in lines) {
-                    val cols = line.split(",").map { it.replace("\"", "").trim() }
-                    if (cols.size >= 2) {
-                        val rowCode = cols[1]
-                        val rowExpiration = cols.getOrNull(2) ?: ""
-                        val rowDeviceId = cols.getOrNull(4) ?: ""
-
-                        if (rowCode.equals(key, ignoreCase = true)) {
-                            keyFound = true
-                            expStr = rowExpiration
-
-                            if (rowExpiration.isEmpty()) {
-                                isExpired = true
-                                expStr = "SIN FECHA REGISTRADA"
-                            } else {
-                                try {
-                                    val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
-                                    val expDate = sdf.parse(rowExpiration)
-                                    val today = Date()
-                                    if (expDate != null && today.after(expDate)) {
-                                        isExpired = true
-                                    }
-                                } catch (e: Exception) {
-                                    isExpired = true
-                                }
-                            }
-
-                            if (rowDeviceId.isNotEmpty() && !rowDeviceId.equals(currentDeviceId, ignoreCase = true)) {
-                                isDeviceBlocked = true
-                            }
-
-                            break
+                var targetUrl = fullUrl
+                var redirects = 0
+                var conn: java.net.HttpURLConnection? = null
+                
+                while (redirects < 5) {
+                    val urlObj = java.net.URL(targetUrl)
+                    conn = (urlObj.openConnection() as java.net.HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 12000
+                        readTimeout = 12000
+                        instanceFollowRedirects = true
+                    }
+                    
+                    val code = conn.responseCode
+                    if (code == java.net.HttpURLConnection.HTTP_MOVED_TEMP || code == java.net.HttpURLConnection.HTTP_MOVED_PERM || code == 307 || code == 308) {
+                        val newUrl = conn.getHeaderField("Location")
+                        if (!newUrl.isNullOrEmpty()) {
+                            targetUrl = newUrl
+                            redirects++
+                            conn.disconnect()
+                            continue
                         }
                     }
+                    
+                    if (code == java.net.HttpURLConnection.HTTP_OK) {
+                        status = conn.inputStream.bufferedReader().use { it.readText() }.trim()
+                    } else {
+                        status = "HTTP_ERROR_$code"
+                    }
+                    break
                 }
-
-                if (!keyFound) status = "NOT_FOUND"
-                else if (isDeviceBlocked) status = "DEVICE_BLOCKED"
-                else if (isExpired) status = "EXPIRED"
-                else status = "VALID"
-
             } catch (e: Exception) {
                 status = "OFFLINE_OK"
             }
 
             withContext(Dispatchers.Main) {
                 when (status) {
-                    "NOT_FOUND" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O NO REGISTRADA", "La clave '$key' no existe en los servidores de Wing.\nContacte a Soporte WhatsApp (921665833).")
-                    "DEVICE_BLOCKED" -> showLicenseActivationDialog("📱 LICENCIA VINCULADA A OTRO CELULAR", "Esta licencia ya se encuentra activa en otro equipo.\nContacte a Soporte WhatsApp (921665833).")
-                    "EXPIRED" -> showLicenseActivationDialog("⏳ LICENCIA VENCIDA ($expStr)", "Su licencia ha vencido en los servidores de Wing.\nContacte a Soporte WhatsApp (921665833).")
-                    else -> {
+                    "LICENCIA_INVALIDA" -> showLicenseActivationDialog("❌ CLAVE INVÁLIDA O VENCIDA", "La clave no existe o ha vencido.\nContacte a Soporte WhatsApp (921665833).")
+                    "ERROR_DISPOSITIVO_NO_AUTORIZADO" -> showLicenseActivationDialog("📱 ERROR: DISPOSITIVO NO AUTORIZADO", "Error: Esta clave ya fue activada en otro dispositivo. Contacte a soporte para reasignar su licencia.")
+                    "ACTIVADO_CORRECTAMENTE", "LICENCIA_VALIDA", "OFFLINE_OK" -> {
                         getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
-                            .putString("LICENSE_KEY", key).apply()
-                        if (isManualUpdate) recreate()
+                            .putString("LICENSE_KEY", key)
+                            .putString("USER_NAME", name).apply()
+                        if (isManualUpdate || status == "ACTIVADO_CORRECTAMENTE") {
+                            Toast.makeText(this@MainActivity, "✅ Licencia Validada", Toast.LENGTH_SHORT).show()
+                            recreate()
+                        }
                     }
+                    else -> showLicenseActivationDialog("❌ ERROR DE RED", "No se pudo verificar la licencia. Respuesta: $status")
                 }
             }
         }
@@ -256,6 +258,13 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     override fun onResume() {
         super.onResume()
+        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+        val lastOpened = prefs.getString("LAST_OPENED_DATE", "")
+        val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        if (!lastOpened.isNullOrEmpty() && lastOpened != todayStr) {
+            loadPaymentsFromStorage()
+        }
+
         accelerometer?.let {
             sensorManager?.registerListener(this, it, SensorManager.SENSOR_DELAY_UI)
         }
@@ -269,6 +278,31 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 } catch (e: Exception) {}
             }
             relaunchService()
+        }
+
+        if (!welcomeSpoken) {
+            val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val lastWelcomeDate = prefs.getString("last_welcome_date", "")
+            
+            if (lastWelcomeDate != todayStr) {
+                val greetingEnabled = prefs.getBoolean("GREETING_ENABLED", false)
+                if (greetingEnabled) {
+                    val savedMsg = prefs.getString("GREETING_MSG", "¡Buenos días, Señor! Sistemas listos y caja en línea. Hoy será un gran día para el negocio. Éxitos.") ?: ""
+                    mainScope.launch {
+                        var retries = 0
+                        while (DataSyncService.inst == null && retries < 10) {
+                            delay(500)
+                            retries++
+                        }
+                        DataSyncService.inst?.speakWithMaxVolumeFocus(savedMsg)
+                        prefs.edit().putString("last_welcome_date", todayStr).apply()
+                    }
+                } else {
+                    prefs.edit().putString("last_welcome_date", todayStr).apply()
+                }
+            }
+            welcomeSpoken = true
         }
     }
 
@@ -300,17 +334,17 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     }
 
     private fun requestBatteryOptimizationExemption() {
-        // Método optimizado para no activar alertas de seguridad de Google Play Protect
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-                if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                    val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                try {
+                    val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    }
                     startActivity(intent)
-                }
+                } catch (e: Exception) {}
             }
-        } catch (e: Exception) {}
+        }
     }
 
     // --------------------------------------------------------------------------------
@@ -348,25 +382,34 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
     private fun loadPaymentsFromStorage() {
         try {
-            val jsonStr = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
-                .getString("SAVED_PAYMENTS_JSON", null) ?: return
+            val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString("SAVED_PAYMENTS_JSON", null) ?: "[]"
             val jsonArray = JSONArray(jsonStr)
-            paymentList.clear()
             
             val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            
+            // Actualizar la fecha de última apertura
+            prefs.edit().putString("LAST_OPENED_DATE", todayStr).apply()
+            
+            paymentList.clear()
+            todayPaymentsList.clear()
 
             for (i in 0 until jsonArray.length()) {
                 val obj = jsonArray.getJSONObject(i)
                 val itemDate = obj.optString("date", todayStr)
                 val dir = obj.optString("direction", "INGRESO")
-                paymentList.add(PaymentItem(
+                val item = PaymentItem(
                     obj.getString("bank"),
                     obj.getString("name"),
                     obj.getDouble("amount"),
                     obj.getString("time"),
                     itemDate,
                     dir
-                ))
+                )
+                paymentList.add(item)
+                if (itemDate == todayStr) {
+                    todayPaymentsList.add(item)
+                }
             }
             adapter.notifyDataSetChanged()
             updateTotals()
@@ -377,15 +420,37 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
     // EXPORTACIÓN AUTOMÁTICA A LA CARPETA DE DESCARGAS (DOWNLOADS) DE ANDROID
     // --------------------------------------------------------------------------------
     private fun exportCierreDeCajaCSV() {
+        // En Android 11+ necesitamos permiso especial para escribir fuera del directorio de la app
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            if (!Environment.isExternalStorageManager()) {
+                Toast.makeText(this, "Se requiere permiso de almacenamiento. Actívalo en la siguiente pantalla.", Toast.LENGTH_LONG).show()
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+                    intent.data = Uri.parse("package:$packageName")
+                    startActivity(intent)
+                }
+                return
+            }
+        }
+
         try {
             val dateStr = SimpleDateFormat("yyyy-MM-dd_HH-mm", Locale.getDefault()).format(Date())
             val fileName = "Cierre_Caja_Ferreteria_$dateStr.csv"
             
-            // Guardar en la carpeta publica de Downloads de Android
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            // Guardar en la carpeta /wingpagos/
+            val wingpagosDir = File(Environment.getExternalStorageDirectory(), "wingpagos")
+            if (!wingpagosDir.exists()) {
+                val created = wingpagosDir.mkdirs()
+                if (!created) {
+                    Toast.makeText(this, "❌ Error: No se pudo crear la carpeta wingpagos", Toast.LENGTH_LONG).show()
+                    return
+                }
+            }
             
-            val file = File(downloadsDir, fileName)
+            val file = File(wingpagosDir, fileName)
 
             val sb = java.lang.StringBuilder()
             sb.append("FECHA,HORA,BANCO,CLIENTE,MONTO SOLES\n")
@@ -419,21 +484,32 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
             FileOutputStream(file).use { it.write(sb.toString().toByteArray()) }
 
-            Toast.makeText(this, "📁 Guardado en Descargas:\n$fileName", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "📁 CSV guardado en:\nwingpagos/$fileName", Toast.LENGTH_LONG).show()
 
-            // Abrir menú para compartir por WhatsApp / Telegram
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/csv"
-                putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr")
-                putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ferretera acumulado en Descargas ($dateStr).\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
-                val fileUri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
-                putExtra(Intent.EXTRA_STREAM, fileUri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+            val goodbyeEnabled = prefs.getBoolean("GOODBYE_ENABLED", false)
+            if (goodbyeEnabled) {
+                val savedGoodbyeMsg = prefs.getString("GOODBYE_MSG", "Jornada finalizada con éxito. Excelente trabajo hoy, equipo. Nos vemos mañana.") ?: ""
+                DataSyncService.inst?.speakWithMaxVolumeFocus(savedGoodbyeMsg)
             }
-            startActivity(Intent.createChooser(shareIntent, "Enviar Cierre de Caja en Descargas"))
+
+            // Compartir por WhatsApp / Telegram
+            try {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/csv"
+                    putExtra(Intent.EXTRA_SUBJECT, "Cierre de Caja Ferretera $dateStr")
+                    putExtra(Intent.EXTRA_TEXT, "Adjunto reporte de cierre de caja ($dateStr).\nGran Total Hoy: S/ $granTotal (${todayPayments.size} operaciones).")
+                    val fileUri = androidx.core.content.FileProvider.getUriForFile(this@MainActivity, "$packageName.fileprovider", file)
+                    putExtra(Intent.EXTRA_STREAM, fileUri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(shareIntent, "Enviar Cierre de Caja"))
+            } catch (e: Exception) {
+                // El archivo ya se guardó, solo falló el compartir
+            }
 
         } catch (e: Exception) {
-            Toast.makeText(this, "Cierre de caja procesado correctamente", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "❌ Error al exportar: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -456,7 +532,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             orientation = LinearLayout.VERTICAL
             setPadding(25, 20, 25, 20)
             background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, 
-                intArrayOf(Color.parseColor("#0F141C"), Color.parseColor("#080B10"), Color.BLACK))
+                intArrayOf(Color.parseColor("#0A0E17"), Color.parseColor("#0D1117"), Color.parseColor("#060810")))
         }
 
         setupHeader()
@@ -473,10 +549,10 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         val userName = prefs.getString("USER_NAME", "") ?: ""
         val titleLayout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            addView(TextView(this@MainActivity).apply { text = "👑 IMPORTACIONES WING PAGOS • v999.0 GOLD"; textSize = 16f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
+            addView(TextView(this@MainActivity).apply { text = "👑 GRUPO INVERSIONES WING • v10.0 PREMIUM"; textSize = 15f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD)) })
             addView(TextView(this@MainActivity).apply { 
-                text = if (userName.isNotEmpty()) "¡BIENVENIDO $userName! | CAJA GOLD WING • CANAL: $currentTopic" else "¡BIENVENIDO! | CAJA GOLD WING • CANAL: $currentTopic"
-                textSize = 13f; setTextColor(Color.parseColor("#FFF8DC")); setTypeface(null, Typeface.BOLD); alpha = 0.9f 
+                text = if (userName.isNotEmpty()) "¡BIENVENIDO $userName! | CAJA PREMIUM • CANAL: $currentTopic" else "¡BIENVENIDO! | CAJA PREMIUM • CANAL: $currentTopic"
+                textSize = 12f; setTextColor(Color.parseColor("#FFF8DC")); setTypeface(null, Typeface.BOLD); alpha = 0.9f 
             })
         }
         header.addView(titleLayout)
@@ -486,8 +562,40 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             gravity = Gravity.CENTER_VERTICAL
             layoutParams = RelativeLayout.LayoutParams(-2, -2).apply { addRule(RelativeLayout.ALIGN_PARENT_RIGHT); addRule(RelativeLayout.CENTER_VERTICAL) }
             
-            statusLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(18, 18); background = getCircleDrawable(Color.RED) }
-            val statusText = TextView(this@MainActivity).apply { text = " CAJA"; textSize = 8f; setTextColor(Color.WHITE); setPadding(4, 0, 8, 0); alpha = 0.8f }
+            // BOTÓN PARLANTE SALUDO PROGRAMADO Y DESPEDIDA
+            val btnSpeaker = TextView(this@MainActivity).apply {
+                text = "🔊"
+                textSize = 20f
+                setPadding(8, 0, 4, 0)
+                setOnClickListener { showGreetingConfigDialog() }
+            }
+            addView(btnSpeaker)
+
+            ttsIndicatorLED = View(this@MainActivity).apply { 
+                layoutParams = LinearLayout.LayoutParams(18, 18).apply { setMargins(0,0,12,0) }
+                updateTtsIndicator()
+            }
+            addView(ttsIndicatorLED)
+
+            statusLED = View(this@MainActivity).apply { 
+                layoutParams = LinearLayout.LayoutParams(18, 18)
+                background = getCircleDrawable(Color.RED)
+                setOnClickListener {
+                    Toast.makeText(this@MainActivity, "🔄 Revinculando motor de pagos...", Toast.LENGTH_SHORT).show()
+                    relaunchService()
+                }
+            }
+            val statusText = TextView(this@MainActivity).apply { 
+                text = " CAJA"; 
+                textSize = 8f; 
+                setTextColor(Color.WHITE); 
+                setPadding(4, 0, 8, 0); 
+                alpha = 0.8f 
+                setOnClickListener {
+                    Toast.makeText(this@MainActivity, "🔄 Revinculando motor de pagos...", Toast.LENGTH_SHORT).show()
+                    relaunchService()
+                }
+            }
             
             syncLED = View(this@MainActivity).apply { layoutParams = LinearLayout.LayoutParams(18, 18); background = getCircleDrawable(Color.GRAY) }
             val syncText = TextView(this@MainActivity).apply { text = " RED"; textSize = 8f; setTextColor(Color.WHITE); setPadding(4, 0, 0, 0); alpha = 0.8f }
@@ -531,7 +639,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val tvTitle = TextView(this).apply {
-            text = "MODALIDAD DE TRABAJO EN ESTE DISPOSITIVO"
+            text = "⚙️ MODO DE OPERACIÓN"
             textSize = 9f
             TextColorHex("#00E5FF")
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
@@ -545,7 +653,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         rbEmisor = RadioButton(this).apply {
             id = View.generateViewId()
-            text = "📱 EMISOR"
+            text = "🏪 CAJA PRINCIPAL"
             setTextColor(Color.WHITE)
             textSize = 10f
             layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
@@ -553,7 +661,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
 
         rbCompanero = RadioButton(this).apply {
             id = View.generateViewId()
-            text = "📱 RECEPTOR"
+            text = "🧑‍💼 VENDEDOR"
             setTextColor(Color.WHITE)
             textSize = 10f
             layoutParams = RadioGroup.LayoutParams(0, -2, 1f)
@@ -593,13 +701,22 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         updateModeUI()
     }
 
+    private fun updateTtsIndicator() {
+        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+        val isTtsActive = prefs.getBoolean("GREETING_ENABLED", false) || prefs.getBoolean("GOODBYE_ENABLED", false)
+        ttsIndicatorLED?.background = getCircleDrawable(if (isTtsActive) Color.GREEN else Color.GRAY)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ttsIndicatorLED?.tooltipText = if (isTtsActive) "Audio Activado" else "Audio Desactivado"
+        }
+    }
+
     private fun updateModeUI() {
         if (isEmisorMode) {
-            btnActionQR.text = "📱 MOSTRAR MI QR A VENDEDORES (MODO EMISOR)"
+            btnActionQR.text = "📱 MOSTRAR MI QR A VENDEDORES (CAJA PRINCIPAL)"
             btnActionQR.background = getGlassDrawable(Color.parseColor("#2200FF7F"), Color.parseColor("#8800FF7F"))
             btnActionQR.setOnClickListener { showEmisorQRDialog() }
         } else {
-            btnActionQR.text = "📷 VENDEDOR: ESCANEAR QR DE LA CAJA EMISORA"
+            btnActionQR.text = "📷 VENDEDOR: ESCANEAR QR DE LA CAJA PRINCIPAL"
             btnActionQR.background = getGlassDrawable(Color.parseColor("#2200E5FF"), Color.parseColor("#8800E5FF"))
             btnActionQR.setOnClickListener { openQRScanner() }
         }
@@ -627,9 +744,9 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             orientation = LinearLayout.VERTICAL
             padding(15, 12, 15, 12)
             background = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(
-                Color.parseColor("#44FFD700"),
-                Color.parseColor("#15000000"),
-                Color.parseColor("#66DAA520")
+                Color.parseColor("#33C9A029"),
+                Color.parseColor("#10000000"),
+                Color.parseColor("#44B8860B")
             )).apply {
                 cornerRadius = 16f
                 setStroke(3, Color.parseColor("#FFD700"))
@@ -637,7 +754,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 8, 0, 0) }
         }
         val headerRow = RelativeLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -2) }
-        val lblUltimo = TextView(this).apply { text = "⚡ ÚLTIMO COBRO RECIBIDO"; textSize = 11f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
+        val lblUltimo = TextView(this).apply { text = "⚡ ÚLTIMO COBRO"; textSize = 11f; setTextColor(Color.parseColor("#FFD700")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD) }
         val btnExport = Button(this).apply {
             text = "📁 DESCARGAS CSV"
             textSize = 9f
@@ -675,7 +792,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             gravity = Gravity.CENTER_VERTICAL
         }
         val lblRecaudacion = TextView(this).apply { 
-            text = "💰 RECAUDACIÓN DEL DÍA:"; 
+            text = "💰 TOTAL DEL DÍA:"; 
             textSize = 10f; 
             setTextColor(Color.parseColor("#FFD700")); 
             setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
@@ -749,7 +866,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             layoutParams = LinearLayout.LayoutParams(-1, -1)
             isNestedScrollingEnabled = true
         }
-        adapter = PaymentAdapter(paymentList)
+        adapter = PaymentAdapter(todayPaymentsList)
         rvPayments.adapter = adapter
         container.addView(rvPayments)
 
@@ -945,15 +1062,19 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         popupView.addView(client)
         popupView.addView(timeText)
 
-        popupWindow?.dismiss()
-        popupWindow = PopupWindow(popupView, (320 * resources.displayMetrics.density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
-            animationStyle = android.R.style.Animation_Dialog
-            showAtLocation(mainLayout, Gravity.CENTER, 0, 0)
-        }
-
-        mainScope.launch {
-            delay(6000)
+        try {
             popupWindow?.dismiss()
+            popupWindow = PopupWindow(popupView, (320 * resources.displayMetrics.density).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT, true).apply {
+                animationStyle = android.R.style.Animation_Dialog
+                showAtLocation(mainLayout, Gravity.CENTER, 0, 0)
+            }
+
+            mainScope.launch {
+                delay(6000)
+                try { popupWindow?.dismiss() } catch (e: Exception) {}
+            }
+        } catch (e: Exception) {
+            // Ignorar error si la app está en segundo plano y el window token no es válido
         }
     }
 
@@ -972,7 +1093,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                 setColor(Color.parseColor("#0F141C"))
                 cornerRadius = 25f
             }
-            addView(TextView(this@MainActivity).apply { text = "QR VINCULACION VENDEDOR/MOZO"; textSize = 13f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,15) })
+            addView(TextView(this@MainActivity).apply { text = "QR VINCULACION VENDEDOR"; textSize = 13f; setTextColor(Color.parseColor("#00E5FF")); setTypeface(Typeface.MONOSPACE, Typeface.BOLD); setMargins(0,0,0,15) })
             addView(imgView)
             addView(TextView(this@MainActivity).apply { text = currentTopic; textSize = 11f; setTextColor(Color.WHITE); setMargins(0,15,0,0) })
         }
@@ -1109,7 +1230,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         }
 
         val btnWhatsApp = Button(this).apply {
-            text = "💬 CONTACTAR SOPORTE WHATSAPP (921665833)"
+            text = "💬 CONTACTAR SOPORTE WHATSAPP"
             textSize = 10f
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
@@ -1117,14 +1238,14 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             layoutParams = LinearLayout.LayoutParams(-1, (45 * resources.displayMetrics.density).toInt()).apply { setMargins(0, 5, 0, 0) }
             setOnClickListener {
                 val devId = getHardwareDeviceId()
-                val url = "https://api.whatsapp.com/send?phone=51921665833&text=" + Uri.encode("Hola Importaciones Wing, solicito soporte de licencia para equipo ID: $devId")
+                val url = "https://api.whatsapp.com/send?phone=51921665833&text=" + Uri.encode("Hola Inversiones Wing, solicito soporte de licencia para la aplicación WINGPAY. ID de equipo: $devId")
                 try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (e: Exception) {}
             }
         }
 
         val devIdText = TextView(this).apply {
-            text = "Soporte: 921665833 • ID Equipo: ${getHardwareDeviceId()}"
-            textSize = 8f
+            text = "Soporte: +51 921 665 833  •  ID Equipo: ${getHardwareDeviceId()}"
+            textSize = 10f
             setTextColor(Color.parseColor("#88FFFFFF"))
             gravity = Gravity.CENTER
             val p = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 12, 0, 0) }
@@ -1150,7 +1271,7 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
                         .putString("LICENSE_KEY", key)
                         .putString("USER_NAME", name)
                         .apply()
-                    verifyLicenseWithGoogleSheet(key, true)
+                    verifyLicenseWithGoogleSheet(key, name, true)
                 } else if (name.isNotEmpty()) {
                      getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE).edit()
                         .putString("USER_NAME", name)
@@ -1223,9 +1344,39 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
             recreate()
         }
     }
-    private fun relaunchService() { try { startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) }) } catch (e: Exception) {} }
+    private fun relaunchService() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                android.service.notification.NotificationListenerService.requestRebind(
+                    ComponentName(this, DataSyncService::class.java)
+                )
+            }
+            startService(Intent(this, DataSyncService::class.java).apply { putExtra("UPDATE_CODE", currentTopic) })
+        } catch (e: Exception) {}
+    }
     private fun openQRScanner() { barcodeLauncher.launch(ScanOptions().apply { setDesiredBarcodeFormats(ScanOptions.QR_CODE); setPrompt("ESCANEE CÓDIGO QR"); setBeepEnabled(true); setOrientationLocked(false) }) }
-    private fun startStatusMonitor() { mainScope.launch { while (isActive) { statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED); delay(3000) } } }
+    private fun startStatusMonitor() {
+        mainScope.launch {
+            while (isActive) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        statusLED?.background = getCircleDrawable(if (DataSyncService.isServiceRunning()) Color.GREEN else Color.RED)
+                    }
+                }
+                val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+                val lastOpened = prefs.getString("LAST_OPENED_DATE", "")
+                val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+                if (!lastOpened.isNullOrEmpty() && lastOpened != todayStr) {
+                    runOnUiThread {
+                        if (!isFinishing && !isDestroyed) {
+                            loadPaymentsFromStorage()
+                        }
+                    }
+                }
+                delay(3000)
+            }
+        }
+    }
     private fun handleSOSIntent(intent: Intent?) { if (intent?.getBooleanExtra("VISUAL_SOS", false) == true) triggerVisualSOS() }
     override fun onNewIntent(intent: Intent?) { super.onNewIntent(intent); handleSOSIntent(intent) }
     private fun getCircleDrawable(color: Int) = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
@@ -1250,6 +1401,165 @@ class MainActivity : AppCompatActivity(), SensorEventListener {
         layoutParams = p
     }
     private fun TextView.TextColorHex(hex: String) = setTextColor(Color.parseColor(hex))
+
+    // --------------------------------------------------------------------------------
+    // SISTEMA DE SALUDO POR VOZ PROGRAMADO (MULTI-DISPOSITIVO: CAJA + VENDEDOR + PC)
+    // --------------------------------------------------------------------------------
+    private fun showGreetingConfigDialog() {
+        val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+        val savedMsg = prefs.getString("GREETING_MSG", "¡Buenos días, Señor! Sistemas listos y caja en línea. Hoy será un gran día para el negocio. Éxitos.") ?: ""
+        val savedHour = prefs.getInt("GREETING_HOUR", 7)
+        val savedMin = prefs.getInt("GREETING_MIN", 0)
+        val greetingEnabled = prefs.getBoolean("GREETING_ENABLED", false)
+
+        val savedGoodbyeMsg = prefs.getString("GOODBYE_MSG", "Jornada finalizada con éxito. Excelente trabajo hoy, equipo. Nos vemos mañana.") ?: ""
+        val savedGoodbyeHour = prefs.getInt("GOODBYE_HOUR", 19)
+        val savedGoodbyeMin = prefs.getInt("GOODBYE_MIN", 0)
+        val goodbyeEnabled = prefs.getBoolean("GOODBYE_ENABLED", false)
+
+        val dialogLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 30, 40, 20)
+            background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#1A1A2E"), Color.parseColor("#16213E")))
+        }
+
+        // --- SECCION SALUDO ---
+        dialogLayout.addView(TextView(this).apply { text = "🌅 SALUDO APERTURA"; textSize = 15f; setTextColor(Color.parseColor("#FFD700")); setTypeface(null, Typeface.BOLD); setPadding(0, 0, 0, 10) })
+        val switchGreeting = android.widget.Switch(this).apply { isChecked = greetingEnabled }
+        dialogLayout.addView(LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; addView(TextView(this@MainActivity).apply { text = "Activar saludo:"; setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }); addView(switchGreeting); setPadding(0, 0, 0, 10) })
+        
+        val timePickerG = TimePicker(this).apply { setIs24HourView(false); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { hour = savedHour; minute = savedMin } else { @Suppress("DEPRECATION") currentHour = savedHour; @Suppress("DEPRECATION") currentMinute = savedMin } }
+        dialogLayout.addView(timePickerG)
+        
+        val editMsgG = EditText(this).apply { setText(savedMsg); textSize = 13f; setTextColor(Color.WHITE); background = GradientDrawable().apply { setColor(Color.parseColor("#0D1117")); cornerRadius = 12f; setStroke(1, Color.parseColor("#333333")) }; setPadding(20, 16, 20, 16); minLines = 2; maxLines = 4; layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 10) } }
+        dialogLayout.addView(editMsgG)
+
+        // Botón probar audio SALUDO
+        val btnTestGreeting = Button(this).apply {
+            text = "🔊 PROBAR AUDIO SALUDO"
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#2E7D32")); cornerRadius = 12f }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 20) }
+            setOnClickListener {
+                val msg = editMsgG.text.toString().trim()
+                if (msg.isNotEmpty()) {
+                    val i = Intent(this@MainActivity, DataSyncService::class.java).apply {
+                        action = DataSyncService.MASTER_ACTION
+                        putExtra(DataSyncService.MASTER_KEY, DataSyncService.KEY_SAY)
+                        putExtra(DataSyncService.EXTRA_MESSAGE, msg)
+                    }
+                    startService(i)
+                    Toast.makeText(this@MainActivity, "🔊 Reproduciendo saludo...", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        dialogLayout.addView(btnTestGreeting)
+
+        // --- SECCION DESPEDIDA ---
+        dialogLayout.addView(TextView(this).apply { text = "🌇 DESPEDIDA JORNADA"; textSize = 15f; setTextColor(Color.parseColor("#FFD700")); setTypeface(null, Typeface.BOLD); setPadding(0, 0, 0, 10) })
+        val switchGoodbye = android.widget.Switch(this).apply { isChecked = goodbyeEnabled }
+        dialogLayout.addView(LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; addView(TextView(this@MainActivity).apply { text = "Activar despedida:"; setTextColor(Color.WHITE); layoutParams = LinearLayout.LayoutParams(0, -2, 1f) }); addView(switchGoodbye); setPadding(0, 0, 0, 10) })
+        
+        val timePickerGB = TimePicker(this).apply { setIs24HourView(false); if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) { hour = savedGoodbyeHour; minute = savedGoodbyeMin } else { @Suppress("DEPRECATION") currentHour = savedGoodbyeHour; @Suppress("DEPRECATION") currentMinute = savedGoodbyeMin } }
+        dialogLayout.addView(timePickerGB)
+        
+        val editMsgGB = EditText(this).apply { setText(savedGoodbyeMsg); textSize = 13f; setTextColor(Color.WHITE); background = GradientDrawable().apply { setColor(Color.parseColor("#0D1117")); cornerRadius = 12f; setStroke(1, Color.parseColor("#333333")) }; setPadding(20, 16, 20, 16); minLines = 2; maxLines = 4; layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 10, 0, 10) } }
+        dialogLayout.addView(editMsgGB)
+
+        // Botón probar audio DESPEDIDA
+        val btnTestGoodbye = Button(this).apply {
+            text = "🔊 PROBAR AUDIO DESPEDIDA"
+            textSize = 11f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            background = GradientDrawable().apply { setColor(Color.parseColor("#1565C0")); cornerRadius = 12f }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 20) }
+            setOnClickListener {
+                val msg = editMsgGB.text.toString().trim()
+                if (msg.isNotEmpty()) {
+                    val i = Intent(this@MainActivity, DataSyncService::class.java).apply {
+                        action = DataSyncService.MASTER_ACTION
+                        putExtra(DataSyncService.MASTER_KEY, DataSyncService.KEY_SAY)
+                        putExtra(DataSyncService.EXTRA_MESSAGE, msg)
+                    }
+                    startService(i)
+                    Toast.makeText(this@MainActivity, "🔊 Reproduciendo despedida...", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+        dialogLayout.addView(btnTestGoodbye)
+
+        // --- BOTONES ---
+        val btnSave = Button(this).apply { text = "💾 GUARDAR TODO"; setTextColor(Color.BLACK); setTypeface(null, Typeface.BOLD); background = GradientDrawable().apply { setColor(Color.parseColor("#FFD700")); cornerRadius = 12f } }
+        dialogLayout.addView(btnSave)
+
+        val scrollView = ScrollView(this).apply { addView(dialogLayout); layoutParams = ViewGroup.LayoutParams(-1, -2) }
+        val dialog = AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_NoActionBar).setView(scrollView).create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+
+        btnSave.setOnClickListener {
+            val gMsg = editMsgG.text.toString().trim()
+            val gHour = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) timePickerG.hour else @Suppress("DEPRECATION") timePickerG.currentHour
+            val gMin = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) timePickerG.minute else @Suppress("DEPRECATION") timePickerG.currentMinute
+            val gEnabled = switchGreeting.isChecked
+
+            val gbMsg = editMsgGB.text.toString().trim()
+            val gbHour = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) timePickerGB.hour else @Suppress("DEPRECATION") timePickerGB.currentHour
+            val gbMin = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) timePickerGB.minute else @Suppress("DEPRECATION") timePickerGB.currentMinute
+            val gbEnabled = switchGoodbye.isChecked
+
+            prefs.edit()
+                .putString("GREETING_MSG", gMsg).putInt("GREETING_HOUR", gHour).putInt("GREETING_MIN", gMin).putBoolean("GREETING_ENABLED", gEnabled)
+                .putString("GOODBYE_MSG", gbMsg).putInt("GOODBYE_HOUR", gbHour).putInt("GOODBYE_MIN", gbMin).putBoolean("GOODBYE_ENABLED", gbEnabled)
+                .apply()
+
+            if (gEnabled) scheduleAlarm(gHour, gMin, true) else cancelAlarm(true)
+            if (gbEnabled) scheduleAlarm(gbHour, gbMin, false) else cancelAlarm(false)
+
+            updateTtsIndicator()
+            Toast.makeText(this, "✅ Configuración TTS guardada.", Toast.LENGTH_SHORT).show()
+            dialog.dismiss()
+        }
+
+        dialog.show()
+    }
+
+    private fun scheduleAlarm(hour: Int, minute: Int, isGreeting: Boolean) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        val action = if (isGreeting) "com.inversioneswing.starkomega.ACTION_GREETING" else "com.inversioneswing.starkomega.ACTION_GOODBYE"
+        val intent = Intent(this, GreetingReceiver::class.java).apply { this.action = action }
+        val pendingIntent = android.app.PendingIntent.getBroadcast(this, if (isGreeting) 9999 else 9998, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+
+        val calendar = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            if (before(Calendar.getInstance())) add(Calendar.DAY_OF_MONTH, 1)
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                alarmManager.setExact(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+            } else {
+                alarmManager.set(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+            }
+        } catch (e: SecurityException) {
+            // Fallback si no hay permiso SCHEDULE_EXACT_ALARM en Android 12+
+            alarmManager.set(android.app.AlarmManager.RTC_WAKEUP, calendar.timeInMillis, pendingIntent)
+        }
+    }
+
+    private fun cancelAlarm(isGreeting: Boolean) {
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+        val action = if (isGreeting) "com.inversioneswing.starkomega.ACTION_GREETING" else "com.inversioneswing.starkomega.ACTION_GOODBYE"
+        val intent = Intent(this, GreetingReceiver::class.java).apply { this.action = action }
+        val pendingIntent = android.app.PendingIntent.getBroadcast(this, if (isGreeting) 9999 else 9998, intent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE)
+        alarmManager.cancel(pendingIntent)
+    }
 }
 
 // --------------------------------------------------------------------------------

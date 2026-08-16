@@ -13,6 +13,7 @@ import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.DatagramPacket
@@ -40,7 +41,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private var panicLockActive = false
 
     // Control de Duplicados (Ventana de 5 segundos)
-    private val processedNotifications = mutableMapOf<String, Long>()
+    private val processedNotifications = Collections.synchronizedMap(mutableMapOf<String, Long>())
 
     companion object {
         internal var inst: DataSyncService? = null
@@ -78,9 +79,10 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     override fun onCreate() {
         super.onCreate()
         inst = this
+        setupForegroundNotification()
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "wingpay:service_lock")
-        if (!lock.isHeld) lock.acquire()
+        if (!lock.isHeld) lock.acquire(10 * 60 * 1000L) // 10 minutos, se renueva en cada onStartCommand
         
         tts = TextToSpeech(this, this)
         
@@ -94,7 +96,13 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val res = tts?.setLanguage(Locale("es", "PE"))
+            var res = tts?.setLanguage(Locale("es", "PE"))
+            if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                res = tts?.setLanguage(Locale("es"))
+            }
+            if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
+                res = tts?.setLanguage(Locale.getDefault())
+            }
             if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
                 ttsOk = true
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -104,7 +112,11 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                         .build()
                     tts?.setAudioAttributes(attrs)
                 }
+            } else {
+                Log.e("DataSyncService", "TTS Language initialization failed.")
             }
+        } else {
+            Log.e("DataSyncService", "TTS Initialization failed with status: $status")
         }
     }
 
@@ -135,7 +147,9 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     private fun processUDPPayload(jsonStr: String) {
         try {
             val j = JSONObject(jsonStr)
-            if (j.optString("type") == "WINGPAY_UDP") {
+            val type = j.optString("type")
+
+            if (type == "WINGPAY_UDP") {
                 val bank = j.optString("bank", "PAGO")
                 val name = j.optString("name", "Cliente")
                 val amt = j.optString("amt", "0.00")
@@ -156,6 +170,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     } else {
                         "Confirmado en Caja por Red Local: $bank de $name por $spokenAmount a las $spokenTime."
                     }
+                    savePaymentLocal(bank, name, amt, timeStr, direction)
                     speak(vocalization, false)
                     dispatchHUD(name, amt, bank, vocalization, true, direction, timeStr)
                 }
@@ -197,7 +212,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
             if (sender == "PC" && type == "SOS") triggerLocalAlarm()
             if (sender == "PC" && type == "SAY") {
                 val msg = j.optString("message", "")
-                if (msg.isNotEmpty()) speak(msg, false)
+                if (msg.isNotEmpty()) speakWithMaxVolumeFocus(msg)
             }
 
             if (!isEmisorMode && type == "PAYMENT_TRANSMISSION") {
@@ -219,6 +234,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                 } else {
                     "Confirmado en Caja: $bank de $name por $spokenAmount a las $spokenTime."
                 }
+                savePaymentLocal(bank, name, amt, timeStr, direction)
                 speak(vocalization, false)
 
                 dispatchHUD(name, amt, bank, vocalization, true, direction, timeStr)
@@ -231,140 +247,170 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     // NOTIFICATION LISTENER ENGINE (FILTROS Y VERIFICACIÓN ANTIFRAUDE)
     // --------------------------------------------------------------------------------
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (!isEmisorMode || panicLockActive) return
+        cleanupOldDedupEntries()
+        try {
+            if (!isEmisorMode || panicLockActive) return
 
-        val pkg = sbn.packageName.lowercase()
-        if (pkg.contains("ntfy")) return
+            val pkg = sbn.packageName.lowercase()
+            if (pkg.contains("ntfy")) return
 
-        val ex = sbn.notification.extras
-        val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
-        val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
-        val bigText = ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
-        val subText = ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
-        val ticker = sbn.notification.tickerText?.toString() ?: ""
-        val rawContent = "$title $text $bigText $subText $ticker".trim()
-        val lowerContent = rawContent.lowercase()
+            val ex = sbn.notification.extras
+            val title = ex.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+            val text = ex.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+            val bigText = ex.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString() ?: ""
+            val subText = ex.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString() ?: ""
+            val ticker = sbn.notification.tickerText?.toString() ?: ""
+            val rawContent = "$title $text $bigText $subText $ticker".trim()
+            val lowerContent = rawContent.lowercase()
 
-        // --------------------------------------------------------------------------------
-        // REMOCIÓN COMPLETA DE WHATSAPP: Ignorar notificaciones de WhatsApp
-        // --------------------------------------------------------------------------------
-        if (pkg.contains("whatsapp")) return
+            // --------------------------------------------------------------------------------
+            // REMOCIÓN COMPLETA DE WHATSAPP: Ignorar notificaciones de WhatsApp
+            // --------------------------------------------------------------------------------
+            if (pkg.contains("whatsapp")) return
 
-        // --------------------------------------------------------------------------------
-        // FILTROS DE IDENTIFICACIÓN DE APLICACIÓN Y CONTENIDO DE PAGO
-        // --------------------------------------------------------------------------------
-        val validPackages = listOf(
-            "com.bcp.bank.yape", "com.bcp.bank.bcap", 
-            "com.bbva.netcash", "com.bbva.mobile",
-            "com.interbank.mobilebanking", "com.scotiabank.peru",
-            "com.google.android.apps.messaging", "com.samsung.android.messaging",
-            "com.android.mms", "com.android.messaging"
-        )
-        val isTargetPkg = validPackages.any { pkg.contains(it) } || 
-                listOf("yape", "plin", "bcp", "bbva", "interbank", "scotia", "banco", "tunki", "bim", "agora", "pay", "wallet", "message", "sms").any { pkg.contains(it) }
+            // --------------------------------------------------------------------------------
+            // FILTROS DE IDENTIFICACIÓN DE APLICACIÓN Y CONTENIDO DE PAGO
+            // --------------------------------------------------------------------------------
+            val validPackages = listOf(
+                "com.bcp.bank.yape", "com.bcp.bank.bcap", 
+                "com.bbva.netcash", "com.bbva.mobile",
+                "com.interbank.mobilebanking", "com.scotiabank.peru",
+                "com.google.android.apps.messaging", "com.samsung.android.messaging",
+                "com.android.mms", "com.android.messaging"
+            )
+            val isTargetPkg = validPackages.any { pkg.contains(it) } || 
+                    listOf("yape", "plin", "bcp", "bbva", "interbank", "scotia", "banco", "tunki", "bim", "agora", "pay", "wallet", "message", "sms").any { pkg.contains(it) }
 
-        val containsPaymentKeyword = lowerContent.contains("yape") || lowerContent.contains("plin") || lowerContent.contains("bcp") || lowerContent.contains("transferencia") || lowerContent.contains("s/") || lowerContent.contains("soles")
+            val containsPaymentKeyword = lowerContent.contains("yape") || 
+                    lowerContent.contains("plin") || 
+                    lowerContent.contains("bcp") || 
+                    lowerContent.contains("transferencia") || 
+                    lowerContent.contains("s/") || 
+                    lowerContent.contains("s/.") || 
+                    lowerContent.contains("s.") || 
+                    lowerContent.contains("soles") ||
+                    lowerContent.contains("abono") ||
+                    lowerContent.contains("deposito") ||
+                    lowerContent.contains("depósito")
 
-        if (!isTargetPkg && !containsPaymentKeyword) return
+            if (!isTargetPkg && !containsPaymentKeyword) return
 
-        // --------------------------------------------------------------------------------
-        // FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS (PROPAGANDA / PUBLICIDAD NO LECTURAR)
-        // --------------------------------------------------------------------------------
-        if (isPropagandaOrLoan(rawContent)) return
+            // --------------------------------------------------------------------------------
+            // FILTRO ANTI-PUBLICIDAD Y ANTI-PRÉSTAMOS (PROPAGANDA / PUBLICIDAD NO LECTURAR)
+            // --------------------------------------------------------------------------------
+            if (isPropagandaOrLoan(rawContent)) return
 
-        val hasWhitelist = WHITELIST_TERMS.any { lowerContent.contains(it) } || rawContent.contains("S/", ignoreCase = true) || rawContent.contains("soles", ignoreCase = true)
-        if (!hasWhitelist) return
+            val hasWhitelist = WHITELIST_TERMS.any { lowerContent.contains(it) } || 
+                    rawContent.contains("S/", ignoreCase = true) || 
+                    rawContent.contains("S/.", ignoreCase = true) || 
+                    rawContent.contains("S.", ignoreCase = true) || 
+                    rawContent.contains("soles", ignoreCase = true)
+            if (!hasWhitelist) return
 
-        // REGEX PARSER ENGINE PARA MONTO
-        val amountPattern = Pattern.compile("(?i)(?:S/|S/\\.|soles)\\s*([\\d.,]+)|([\\d.,]+)\\s*(?:soles)")
-        val amountMatcher = amountPattern.matcher(rawContent)
+            // REGEX PARSER ENGINE PARA MONTO (Soportando S., S, S/., S/ y soles)
+            val amountPattern = Pattern.compile("(?i)(?:S/|S/\\.|S\\.|S\\b|soles|sol|s\\b)\\s*([\\d.,]+)|([\\d.,]+)\\s*(?:soles|sol|s\\b)")
+            val amountMatcher = amountPattern.matcher(rawContent)
 
-        if (amountMatcher.find()) {
-            val rawAmountStr = amountMatcher.group(1) ?: amountMatcher.group(2) ?: "0.00"
-            val cleanedAmount = cleanAmountString(rawAmountStr)
-            if (cleanedAmount == "0" || cleanedAmount.isEmpty()) return
+            if (amountMatcher.find()) {
+                val rawAmountStr = amountMatcher.group(1) ?: amountMatcher.group(2) ?: "0.00"
+                val cleanedAmount = cleanAmountString(rawAmountStr)
+                if (cleanedAmount == "0" || cleanedAmount.isEmpty()) return
 
-            // IDENTIFICAR DIRECCIÓN DEL FLUJO (INGRESO vs EGRESO)
-            val direction = detectFlowDirection(rawContent)
+                // IDENTIFICAR DIRECCIÓN DEL FLUJO (INGRESO vs EGRESO)
+                val direction = detectFlowDirection(rawContent)
 
-            // MUTEAR / IGNORAR COMPLETAMENTE EGRESOS (CUANDO TÚ ENVIAS O TRASFIERES DINERO)
-            if (direction == "EGRESO") return
+                // MUTEAR / IGNORAR COMPLETAMENTE EGRESOS (CUANDO TÚ ENVIAS O TRASFIERES DINERO)
+                if (direction == "EGRESO") return
 
-            // EXTRACTOR INTELIGENTE DE REMITENTE / DESTINATARIO
-            var senderName = ""
-            val titleLower = title.lowercase().trim()
-            val isGenericTitle = titleLower.isEmpty() || listOf(
-                "yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", 
-                "notificación", "notificacion", "mensaje", "confirmación", "confirmacion", 
-                "pago", "pago recibido", "pago realizado", "transferencia"
-            ).any { titleLower == it || titleLower.startsWith(it) }
+                // EXTRACTOR INTELIGENTE DE REMITENTE / DESTINATARIO
+                var senderName = ""
+                val titleLower = title.lowercase().trim()
+                
+                val genericKeywords = listOf(
+                    "yape", "bcp", "plin", "bbva", "interbank", "scotiabank", "banco", 
+                    "notificación", "notificacion", "mensaje", "confirmación", "confirmacion", 
+                    "pago", "pago recibido", "pago realizado", "transferencia", "yapearon",
+                    "yapeo", "yapeó", "recibiste", "abono", "depósito", "deposito", "plinó", "plino", "tunki", "bim", "agora",
+                    "operación", "operacion", "sms", "alertas", "avisos", "ingreso", "caja"
+                )
+                val isGenericTitle = titleLower.isEmpty() || 
+                    genericKeywords.any { titleLower.contains(it) } ||
+                    titleLower.replace(Regex("[^a-zñáéíóú]"), "").let { cleanTitle ->
+                        genericKeywords.any { cleanTitle.contains(it) }
+                    }
 
-            if (!isGenericTitle && title.length in 3..35 && !title.contains("S/", ignoreCase = true)) {
-                senderName = cleanSenderName(title)
-            }
-            
-            if (senderName.isEmpty() || senderName == "Cliente") {
-                val senderPattern1 = Pattern.compile("(?:de|por|remitente:|de parte de)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})", Pattern.CASE_INSENSITIVE)
-                val senderMatcher1 = senderPattern1.matcher(rawContent)
-                if (senderMatcher1.find()) {
-                    val candidate = senderMatcher1.group(1)
-                    if (!candidate.isNullOrBlank()) {
-                        senderName = cleanSenderName(candidate.trim())
+                if (!isGenericTitle && title.length in 3..35 && !title.contains(Regex("(?i)(?:S/|S/\\.|S\\.|soles)"))) {
+                    senderName = cleanSenderName(title)
+                }
+                
+                if (senderName.isEmpty() || senderName == "Cliente") {
+                    val senderPattern1 = Pattern.compile("(?:de|por|remitente:|de parte de)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})", Pattern.CASE_INSENSITIVE)
+                    val senderMatcher1 = senderPattern1.matcher(rawContent)
+                    if (senderMatcher1.find()) {
+                        val candidate = senderMatcher1.group(1)
+                        if (!candidate.isNullOrBlank()) {
+                            senderName = cleanSenderName(candidate.trim())
+                        }
                     }
                 }
-            }
 
-            if (senderName.isEmpty() || senderName == "Cliente") {
-                val senderPattern2 = Pattern.compile("([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio|recibió|recibio)", Pattern.CASE_INSENSITIVE)
-                val senderMatcher2 = senderPattern2.matcher(rawContent)
-                if (senderMatcher2.find()) {
-                    val candidate = senderMatcher2.group(1)
-                    if (!candidate.isNullOrBlank()) {
-                        senderName = cleanSenderName(candidate.trim())
+                if (senderName.isEmpty() || senderName == "Cliente") {
+                    val senderPattern2 = Pattern.compile("([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})\\s+(?:te yapeó|te yapeo|te plinó|te plino|te envió|te envio|te transfirió|te transferio|recibió|recibio)", Pattern.CASE_INSENSITIVE)
+                    val senderMatcher2 = senderPattern2.matcher(rawContent)
+                    if (senderMatcher2.find()) {
+                        val candidate = senderMatcher2.group(1)
+                        if (!candidate.isNullOrBlank()) {
+                            senderName = cleanSenderName(candidate.trim())
+                        }
                     }
                 }
-            }
 
-            if (senderName.isEmpty() || senderName == "Cliente") {
-                val senderPattern3 = Pattern.compile("(?:a:|para:|yapeaste a|transferiste a|enviaste a)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})", Pattern.CASE_INSENSITIVE)
-                val senderMatcher3 = senderPattern3.matcher(rawContent)
-                if (senderMatcher3.find()) {
-                    val candidate = senderMatcher3.group(1)
-                    if (!candidate.isNullOrBlank()) {
-                        senderName = cleanSenderName(candidate.trim())
+                if (senderName.isEmpty() || senderName == "Cliente") {
+                    val senderPattern3 = Pattern.compile("(?:a:|para:|yapeaste a|transferiste a|enviaste a)\\s+([A-Za-zÁÉÍÓÚáéíóúñÑ\\s]{2,35})", Pattern.CASE_INSENSITIVE)
+                    val senderMatcher3 = senderPattern3.matcher(rawContent)
+                    if (senderMatcher3.find()) {
+                        val candidate = senderMatcher3.group(1)
+                        if (!candidate.isNullOrBlank()) {
+                            senderName = cleanSenderName(candidate.trim())
+                        }
                     }
                 }
+
+                if (senderName.isBlank() || senderName.lowercase().contains("confirmaci")) {
+                    senderName = "Cliente"
+                }
+
+                val bankName = identifyBank(pkg, rawContent)
+                val currentTimeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                val spokenTime = formatTimeForSpeech(currentTimeStr)
+
+                // DEDUPLICACIÓN EN EMISOR (Ventana de 4 segundos)
+                val dedupKey = "EMISOR|$bankName|$senderName|$cleanedAmount|$direction"
+                val now = System.currentTimeMillis()
+                val lastSeen = processedNotifications[dedupKey] ?: 0L
+                if (now - lastSeen < 4000) return
+                processedNotifications[dedupKey] = now
+
+                // REGISTRO LOCAL ANTES DE TTS/UI
+                savePaymentLocal(bankName, senderName, cleanedAmount, currentTimeStr, direction)
+
+                val spokenAmount = speakAmount(cleanedAmount)
+                val speechText = if (direction == "EGRESO") {
+                    "Transferiste por $bankName a $senderName $spokenAmount a las $spokenTime."
+                } else {
+                    "Recibiste $bankName de $senderName por $spokenAmount a las $spokenTime."
+                }
+                
+                // VOCALIZACIÓN CON AUDIOFOCUS & FORZADO DE VOLUMEN FERRETERO
+                speakWithMaxVolumeFocus(speechText)
+
+                dispatchHUD(senderName, cleanedAmount, bankName, speechText, false, direction, currentTimeStr)
+
+                // TRANSMISIÓN PARALELA (NTFY + UDP 5005)
+                syncParallelMultidestino(bankName, senderName, cleanedAmount, speechText, direction, currentTimeStr)
             }
-
-            if (senderName.isBlank() || senderName.lowercase().contains("confirmaci")) {
-                senderName = "Cliente"
-            }
-
-            val bankName = identifyBank(pkg, rawContent)
-            val currentTimeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-            val spokenTime = formatTimeForSpeech(currentTimeStr)
-
-            // DEDUPLICACIÓN EN EMISOR (Ventana de 4 segundos)
-            val dedupKey = "EMISOR|$bankName|$senderName|$cleanedAmount|$direction"
-            val now = System.currentTimeMillis()
-            val lastSeen = processedNotifications[dedupKey] ?: 0L
-            if (now - lastSeen < 4000) return
-            processedNotifications[dedupKey] = now
-
-            val spokenAmount = speakAmount(cleanedAmount)
-            val speechText = if (direction == "EGRESO") {
-                "Transferiste por $bankName a $senderName $spokenAmount a las $spokenTime."
-            } else {
-                "Recibiste $bankName de $senderName por $spokenAmount a las $spokenTime."
-            }
-            
-            // VOCALIZACIÓN CON AUDIOFOCUS & FORZADO DE VOLUMEN FERRETERO
-            speakWithMaxVolumeFocus(speechText)
-
-            dispatchHUD(senderName, cleanedAmount, bankName, speechText, false, direction, currentTimeStr)
-
-            // TRANSMISIÓN PARALELA (NTFY + UDP 5005)
-            syncParallelMultidestino(bankName, senderName, cleanedAmount, speechText, direction, currentTimeStr)
+        } catch (e: Exception) {
+            Log.e("DataSyncService", "Error processing notification: ${e.message}", e)
         }
     }
 
@@ -420,7 +466,7 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     // --------------------------------------------------------------------------------
     // MEJORA 3: CONTROL DE VOLUMEN FORZADO CON AUDIOFOCUS PARA LOCATORIOS FERRETEROS
     // --------------------------------------------------------------------------------
-    private fun speakWithMaxVolumeFocus(text: String) {
+    internal fun speakWithMaxVolumeFocus(text: String) {
         if (text.isEmpty() || !ttsOk) return
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
@@ -615,12 +661,19 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
                     }
                     KEY_SAY -> {
                         val msg = it.getStringExtra(EXTRA_MESSAGE) ?: ""
-                        if (msg.isNotEmpty()) sendVoiceToPC(msg)
+                        if (msg.isNotEmpty()) {
+                            speakWithMaxVolumeFocus(msg)
+                            sendVoiceToPC(msg)
+                        }
                     }
                 }
             }
         }
         setupForegroundNotification()
+        // Renovar WakeLock en cada invocación para evitar expiración
+        if (::lock.isInitialized && !lock.isHeld) {
+            lock.acquire(10 * 60 * 1000L)
+        }
         return START_STICKY
     }
 
@@ -671,6 +724,8 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
 
     fun stopSiren() { 
         sirenTone?.stopTone()
+        sirenTone?.release()
+        sirenTone = null
         (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
         panicLockActive = false
     }
@@ -699,27 +754,105 @@ class DataSyncService : NotificationListenerService(), TextToSpeech.OnInitListen
     }
 
     private fun setupForegroundNotification() {
-        val channelId = "WINGPAY_SERVICE_CHANNEL"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "WingPay Engine", NotificationManager.IMPORTANCE_LOW)
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.createNotificationChannel(channel)
+        try {
+            val channelId = "WINGPAY_SERVICE_CHANNEL"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(channelId, "WingPay Engine", NotificationManager.IMPORTANCE_LOW)
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.createNotificationChannel(channel)
+            }
+
+            val notification = NotificationCompat.Builder(this, channelId)
+                .setContentTitle("WingPay Premium Engine v10.0")
+                .setContentText("Caja Principal Activa")
+                .setSmallIcon(android.R.drawable.stat_notify_sync)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    startForeground(1001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+                } catch (e: Exception) {
+                    startForeground(1001, notification)
+                }
+            } else {
+                startForeground(1001, notification)
+            }
+        } catch (e: Exception) {
+            // Ignorar errores de StartForegroundService. 
+            // NotificationListenerService ya es mantenido por el sistema.
         }
+    }
 
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("WingPay Ferretero Engine v73.0")
-            .setContentText("Caja Principal Activa")
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
+    private fun savePaymentLocal(bank: String, name: String, amountStr: String, time: String, direction: String) {
+        try {
+            val prefs = getSharedPreferences("STARK_PREFS", Context.MODE_PRIVATE)
+            val jsonStr = prefs.getString("SAVED_PAYMENTS_JSON", "[]") ?: "[]"
+            val jsonArray = JSONArray(jsonStr)
 
-        startForeground(1001, notification)
+            // Crear nuevo objeto
+            val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+            val amountVal = amountStr.toDoubleOrNull() ?: 0.0
+            val obj = JSONObject().apply {
+                put("bank", bank)
+                put("name", name)
+                put("amount", amountVal)
+                put("time", time)
+                put("date", todayStr)
+                put("direction", direction)
+            }
+
+            // Crear una nueva lista combinada
+            val newJsonArray = JSONArray()
+            newJsonArray.put(obj) // Primero el nuevo pago
+
+            // Filtrar últimos 7 días
+            val cal = Calendar.getInstance()
+            cal.add(Calendar.DAY_OF_YEAR, -7)
+            val cutoffDate = cal.time
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+            for (i in 0 until jsonArray.length()) {
+                val pObj = jsonArray.getJSONObject(i)
+                val pDateStr = pObj.optString("date", todayStr)
+                val pDate = try { sdf.parse(pDateStr) } catch (e: Exception) { Date() }
+                if (pDate != null && !pDate.before(cutoffDate)) {
+                    newJsonArray.put(pObj)
+                }
+            }
+
+            prefs.edit().putString("SAVED_PAYMENTS_JSON", newJsonArray.toString()).apply()
+        } catch (e: Exception) {
+            Log.e("DataSyncService", "Error saving payment locally: ${e.message}", e)
+        }
+    }
+
+    // Limpieza periódica del mapa de duplicados para evitar memory leak
+    private fun cleanupOldDedupEntries() {
+        val now = System.currentTimeMillis()
+        synchronized(processedNotifications) {
+            val iterator = processedNotifications.iterator()
+            while (iterator.hasNext()) {
+                val entry = iterator.next()
+                if (now - entry.value > 30_000) { // Entradas de más de 30 segundos
+                    iterator.remove()
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
         serviceScope.cancel()
         udpJob?.cancel()
         tts?.shutdown()
+        try {
+            if (::lock.isInitialized && lock.isHeld) {
+                lock.release()
+            }
+        } catch (e: Exception) {}
+        if (inst == this) {
+            inst = null
+        }
         super.onDestroy()
     }
 }

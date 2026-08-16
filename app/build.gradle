@@ -3,17 +3,50 @@ plugins {
     id 'kotlin-android'
 }
 
+def versionPropsFile = file('version.properties')
+def buildCode = 10
+def buildName = "10.0"
+
+if (versionPropsFile.canRead()) {
+    Properties versionProps = new Properties()
+    versionProps.load(new FileInputStream(versionPropsFile))
+    
+    // Solo auto-incrementar si la tarea es de assemble (Release o Debug) y no un simple sync
+    gradle.taskGraph.whenReady { taskGraph ->
+        if (taskGraph.hasTask(":$project.name:assembleRelease") || taskGraph.hasTask(":$project.name:assembleDebug")) {
+            buildCode = versionProps['VERSION_CODE'].toInteger() + 1
+            def minor = versionProps['VERSION_MINOR'].toInteger() + 1
+            def major = versionProps['VERSION_MAJOR'].toInteger()
+            versionProps['VERSION_CODE'] = buildCode.toString()
+            versionProps['VERSION_MINOR'] = minor.toString()
+            versionProps.store(versionPropsFile.newWriter(), null)
+            buildName = "${major}.${minor}"
+        } else {
+            buildCode = versionProps['VERSION_CODE'].toInteger()
+            def minor = versionProps['VERSION_MINOR'].toInteger()
+            def major = versionProps['VERSION_MAJOR'].toInteger()
+            buildName = "${major}.${minor}"
+        }
+    }
+} else {
+    // Inicializar archivo
+    Properties versionProps = new Properties()
+    versionProps['VERSION_CODE'] = "10"
+    versionProps['VERSION_MAJOR'] = "10"
+    versionProps['VERSION_MINOR'] = "0"
+    versionProps.store(versionPropsFile.newWriter(), null)
+}
+
 android {
     namespace "com.inversioneswing.starkomega"
     compileSdk 34
-
 
     defaultConfig {
         applicationId "com.inversioneswing.starkomega"
         minSdk 21
         targetSdk 34
-        versionCode 10
-        versionName "10.0-PREMIUM"
+        versionCode buildCode
+        versionName buildName + "-PREMIUM"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 

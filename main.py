@@ -134,7 +134,7 @@ class WingPayBridge(FloatLayout):
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             Intent = autoclass('android.content.Intent')
-            service = autoclass('com.inversioneswing.wingpay.DataSyncService')
+            service = autoclass('com.inversioneswing.starkomega.DataSyncService')
             intent = Intent(PythonActivity.mActivity, service)
             intent.putExtra("CMD_PAYMENT", True)
             intent.putExtra("BANK", "TUNNEL")
@@ -150,7 +150,7 @@ class WingPayBridge(FloatLayout):
             from jnius import autoclass
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             Intent = autoclass('android.content.Intent')
-            service = autoclass('com.inversioneswing.wingpay.DataSyncService')
+            service = autoclass('com.inversioneswing.starkomega.DataSyncService')
             intent = Intent(PythonActivity.mActivity, service)
             intent.putExtra("UPDATE_CODE", "wingpay_client_A2ZQV4")
             PythonActivity.mActivity.startService(intent)
